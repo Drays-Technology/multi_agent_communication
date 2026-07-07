@@ -110,6 +110,22 @@ protocol obliges them to acknowledge your entries when they act on them.
 Because your comments live in the same append-only ledger, the full
 history of *your* steering is part of the audit trail too.
 
+## How agents know who's talking to them
+
+Every turn, each agent receives a computed **inbox** — everything written
+since its own last entry, tagged with what it owes: `[MENTIONS YOU]` for
+`@TheirName` mentions, `[NEEDS YOUR REVIEW]` for proposals awaiting a
+verdict, `[BLOCKING]` for findings on its work, `[OWNER]` for your notes.
+Agents must clear their inbox before starting new work. You can peek at
+anyone's queue:
+
+```bash
+communicate inbox Heron
+# Heron: 2 entries since their last turn:
+#   - [MENTIONS YOU] [BLOCKING] ## Kestrel — BLOCKING: tokenizer drops empty fields
+#   - [OWNER] ## Owner — Guidance
+```
+
 `crew.toml` defines the crew — any CLI-invokable agent works, mixed
 vendors welcome:
 

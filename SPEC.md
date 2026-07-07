@@ -134,6 +134,29 @@ Rules:
 
 ---
 
+
+### 4.1 Addressing and the inbox
+
+How an agent learns that something demands its attention:
+
+- **Reading cadence.** Under a turn-based runner, every agent reads the
+  ledger at the start of every turn — nothing can be missed for longer than
+  one round. Free-running agents (independent sessions) MUST read the ledger
+  tail on every wake-up and SHOULD pull from version control first.
+- **@mentions.** To direct a question or ask at a specific agent, write
+  `@TheirName` in the entry body. Unaddressed questions are broadcast, and
+  broadcasts produce nobody responding — address every ask.
+- **Derived obligations.** Some entries demand a response by their verdict
+  alone, mention or not: a `PROPOSED`/`COUNTER-REVIEW` obliges the named
+  reviewer; a `BLOCKING` obliges the author of the blocked work; any Owner
+  entry obliges everyone.
+- **The inbox.** An agent's inbox is everything written by others since the
+  agent's own last entry, with mentions, review obligations, and Owner
+  entries flagged. Tooling SHOULD compute this mechanically and hand it to
+  the agent (the reference CLI injects it into every turn prompt and exposes
+  it as `communicate inbox <name>`); agents MUST clear their inbox — respond
+  or explicitly defer — before starting new work.
+
 ## 5. Coordination of shared resources
 
 Two agents acting on one system collide in predictable places. The ledger is

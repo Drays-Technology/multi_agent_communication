@@ -92,7 +92,14 @@ THE SHARED GOAL:
 {goal}
 
 THE LEDGER: ./{ledger} — read its tail FIRST; your collaborators' latest
-entries, verdicts, and review asks are there. Protocol rules, short form:
+entries, verdicts, and review asks are there.
+
+YOUR INBOX — entries written since your last turn, tagged where they demand
+something of you (this digest is computed, but READ THE FULL ENTRIES in the
+ledger before acting):
+{inbox}
+
+Protocol rules, short form:
 
 - Do real work toward the goal in this directory this turn (write code, run
   tests, review diffs — whatever your role calls for). Prefer one meaningful
@@ -103,7 +110,12 @@ entries, verdicts, and review asks are there. Protocol rules, short form:
   PROPOSED / APPROVED / BLOCKING / COUNTER-REVIEW / ENDORSED / DISPOSITIONED.
 - Never edit or delete existing entries; correct mistakes by superseding.
 - Never approve your own change; review actual diffs/behavior, not summaries.
-- Address open review asks directed at you before starting new work.
+- Address your inbox before starting new work: a PROPOSED or COUNTER-REVIEW
+  by a collaborator needs your verdict; a BLOCKING finding on your work needs
+  a fix or a rebuttal with evidence.
+- To direct a question or ask at a specific collaborator, @mention them by
+  name (write "@" + their exact agent name). Mentions land in the
+  addressee's inbox; unaddressed questions land nowhere.
 - Entries signed "Owner" are the human's voice. The NEWEST Owner entry is
   your highest-priority instruction — it may add constraints, redirect your
   work, or amend the goal itself. Acknowledge it in your entry when you act
@@ -188,6 +200,49 @@ def owner_stop_count(ledger_text: str) -> int:
     return len(re.findall(r"^## Owner — STOP", ledger_text, re.MULTILINE))
 
 
+def split_entries_by_author(ledger_text: str) -> list[tuple[str, str]]:
+    """[(author, whole_entry), ...] in ledger order."""
+    out = []
+    for entry in re.split(r"(?m)^(?=## )", ledger_text):
+        m = re.match(r"^## (\S+) — ", entry)
+        if m:
+            out.append((m.group(1), entry.rstrip()))
+    return out
+
+
+def compute_inbox(ledger_text: str, agent_name: str) -> list[str]:
+    """What this agent must see before working: every entry since its own
+    last entry, tagged when it demands something of the agent.
+
+    Tags: [MENTIONS YOU]      — contains @agent_name
+          [NEEDS YOUR REVIEW] — PROPOSED / COUNTER-REVIEW by someone else
+          [BLOCKING]          — a blocking finding (fix or rebut)
+          [OWNER]             — the human spoke; top priority
+    """
+    entries = split_entries_by_author(ledger_text)
+    last_own = -1
+    for i, (author, _) in enumerate(entries):
+        if author == agent_name:
+            last_own = i
+    digest = []
+    mention = f"@{agent_name}"
+    for author, entry in entries[last_own + 1:]:
+        if author == agent_name:
+            continue
+        heading = entry.splitlines()[0]
+        tags = []
+        if author == "Owner":
+            tags.append("[OWNER]")
+        if mention in entry:
+            tags.append("[MENTIONS YOU]")
+        if re.search(r"— (PROPOSED|COUNTER-REVIEW)", heading):
+            tags.append("[NEEDS YOUR REVIEW]")
+        if "— BLOCKING" in heading:
+            tags.append("[BLOCKING]")
+        digest.append(f"{' '.join(tags) + ' ' if tags else ''}{heading}")
+    return digest
+
+
 # ── init (wizard) ────────────────────────────────────────────────────────────
 
 def detect_agent_clis() -> list[tuple[str, str]]:
@@ -270,12 +325,16 @@ def cmd_init(args: argparse.Namespace) -> None:
 # ── run ──────────────────────────────────────────────────────────────────────
 
 def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path, ledger: Path) -> None:
+    inbox = compute_inbox(ledger.read_text(), agent["name"]) if ledger.exists() else []
+    inbox_text = "\n".join(f"- {line}" for line in inbox) if inbox else \
+        "- (nothing new since your last turn)"
     prompt = TURN_PROMPT.format(
         name=agent["name"],
         role=agent.get("role", "Collaborator"),
         brief=agent.get("brief", ""),
         goal=cfg["goal"].strip(),
         ledger=cfg["ledger"],
+        inbox=inbox_text,
         date=today(),
         round=round_no,
         max_rounds=cfg["max_rounds"],
@@ -456,6 +515,25 @@ def cmd_say(args: argparse.Namespace) -> None:
     print(f'noted in the ledger as "## Owner — {args.title}".')
     print("every agent reads the ledger at the start of its turn and treats")
     print("the newest Owner entry as its top-priority instruction.")
+
+
+def cmd_inbox(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    known = [a["name"] for a in cfg["agents"]] + ["Owner"]
+    if args.agent not in known:
+        die(f"unknown agent {args.agent!r} — crew: {', '.join(known)}")
+    digest = compute_inbox(ledger.read_text(), args.agent)
+    if not digest:
+        print(f"{args.agent}: inbox empty — nothing new since their last entry.")
+        return
+    print(f"{args.agent}: {len(digest)} entr{'y' if len(digest) == 1 else 'ies'} "
+          f"since their last turn:")
+    for line in digest:
+        print(f"  - {line}")
 
 
 def cmd_stop(args: argparse.Namespace) -> None:
@@ -649,6 +727,10 @@ def main() -> None:
     p_stop = sub.add_parser("stop", help="halt a running crew after the current turn")
     p_stop.add_argument("reason", nargs="*", help="optional reason, recorded in the ledger")
     p_stop.set_defaults(fn=cmd_stop)
+
+    p_inbox = sub.add_parser("inbox", help="what an agent must respond to (mentions, verdicts, Owner notes)")
+    p_inbox.add_argument("agent", help="agent name (or Owner)")
+    p_inbox.set_defaults(fn=cmd_inbox)
 
     p_da = sub.add_parser("_demo-agent")  # internal: a scripted demo agent turn
     p_da.add_argument("name")
