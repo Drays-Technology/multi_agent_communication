@@ -95,7 +95,11 @@ communicate init
 #      implementer model: opus        the MODEL per agent (sonnet/opus/…,
 #      reviewer uses    [1]: 2        Enter = the CLI's default).
 #      reviewer model:
-# 3) Name the agents             → Enter accepts Kestrel/Heron.
+# 3) Name the agents             → Enter accepts Agent1/Agent2.
+
+# Need more hands later? One line adds a crew member:
+#   communicate add-agent --role Tester --brief "Verify by execution."
+#   → added Agent3;  --name/--cli/--model to customize
 ```
 
 Tidy by design: the only file the tool keeps in your project root is

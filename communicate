@@ -464,7 +464,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     cfg_path.parent.mkdir(exist_ok=True)
 
     goal = DEFAULT_GOAL
-    a1_name, a2_name = "Kestrel", "Heron"
+    a1_name, a2_name = "Agent1", "Agent2"
     fallback = "your-agent-cli {prompt}"
     a1_command = a2_command = fallback
 
@@ -511,9 +511,10 @@ def cmd_init(args: argparse.Namespace) -> None:
                   + ", ".join(n for n, _ in KNOWN_AGENT_CLIS) + ").")
             print(f"   Writing a placeholder — edit `command` in {CONFIG} before running.")
 
-        print("\n3) Name the agents (they sign the ledger with these).")
-        a1_name = ask("   implementer name", a1_name)
-        a2_name = ask("   reviewer name", a2_name)
+        print("\n3) Name the agents (they sign the ledger with these; no")
+        print("   spaces — @mentions and ledger parsing need single tokens).")
+        a1_name = ask("   implementer name", a1_name).replace(" ", "")
+        a2_name = ask("   reviewer name", a2_name).replace(" ", "")
         if a2_name == a1_name:
             a2_name = a1_name + "-2"
             print(f"   names must differ — reviewer renamed to {a2_name}")
@@ -907,6 +908,66 @@ def cmd_claim(args: argparse.Namespace) -> None:
     print("sign every entry with this exact name; others @mention you with it.")
 
 
+def next_agent_name(names: list[str]) -> str:
+    i = 1
+    while f"Agent{i}" in names:
+        i += 1
+    return f"Agent{i}"
+
+
+def cmd_add_agent(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg_path = find_config(root)
+    if cfg_path is None:
+        die("no crew here — run `communicate init` first")
+    cfg = load_config(root)
+    names = _crew_names(cfg)
+
+    name = (args.name or next_agent_name(names)).strip()
+    if name == "Owner":
+        die('"Owner" is reserved for the human')
+    if " " in name:
+        die("agent names cannot contain spaces (@mentions and ledger parsing "
+            "need single tokens) — use Agent3, not 'Agent 3'")
+    if name in names:
+        die(f"{name!r} is taken — crew: {', '.join(names)}")
+
+    command = args.command
+    cli_name = args.cli
+    if not command:
+        clis = dict(KNOWN_AGENT_CLIS)
+        if cli_name:
+            if cli_name not in clis:
+                die(f"unknown --cli {cli_name!r}; known: {', '.join(clis)}")
+            command = clis[cli_name]
+        else:
+            detected = detect_agent_clis()
+            if not detected:
+                die("no known agent CLI on PATH — pass "
+                    "--command 'your-cli {prompt}'")
+            cli_name, command = detected[0]
+        if args.model:
+            command += f" {MODEL_FLAGS.get(cli_name, '--model')} {args.model}"
+    if "{prompt}" not in command:
+        die("the command must contain {prompt}")
+    if "'" in command:
+        die("command contains a single quote — add this agent by editing "
+            f"{cfg_path} directly")
+
+    role = args.role or "Collaborator"
+    brief = (args.brief or "").replace('"', "'")
+    block = ('\n[[agents]]\nname = "%s"\nrole = "%s"\nbrief = "%s"\n'
+             "command = '%s'\n" % (name, role, brief, command))
+    with cfg_path.open("a") as fh:
+        fh.write(block)
+    crew = ", ".join(names + [name])
+    print(f"added {name} ({role}, {cli_name or 'custom command'}) → {cfg_path}")
+    print(f"crew is now: {crew}")
+    print("tip: give each agent a distinct territory in its brief, and with 3+")
+    print("     agents wire explicit review pairs — broadcast review requests")
+    print("     produce nobody reviewing (SPEC §3.2).")
+
+
 def cmd_inbox(args: argparse.Namespace) -> None:
     root = Path.cwd()
     cfg = load_config(root)
@@ -1293,6 +1354,15 @@ def main() -> None:
     p_history = sub.add_parser("history", help="search live ledger + archives")
     p_history.add_argument("query", nargs="+", help="text to search for (case-insensitive)")
     p_history.set_defaults(fn=cmd_history)
+
+    p_add = sub.add_parser("add-agent", help="add an agent to the crew (auto-named Agent3, Agent4, …)")
+    p_add.add_argument("--name", default=None, help="agent name (default: next free AgentN)")
+    p_add.add_argument("--role", default=None, help='e.g. "Tester", "Docs" (default Collaborator)')
+    p_add.add_argument("--brief", default=None, help="one-line working contract")
+    p_add.add_argument("--cli", default=None, help="claude / codex / aider / gemini (default: first detected)")
+    p_add.add_argument("--model", default=None, help="model override for that CLI")
+    p_add.add_argument("--command", default=None, help="raw command with {prompt} (overrides --cli)")
+    p_add.set_defaults(fn=cmd_add_agent)
 
     p_claim = sub.add_parser("claim", help="claim an agent identity in the ledger (free-running agents)")
     p_claim.add_argument("name", help="unique agent name to claim")
