@@ -1,6 +1,6 @@
 # communicate.md — a ledger protocol for multi-agent collaboration
 
-**One markdown file. Multiple AI agents. Real peer review. Full audit trail.**
+**One markdown file. Multiple AI agents. Real peer review. Full audit trails.**
 
 `communicate.md` is a convention — not a framework — for making two or more
 AI agents (any vendor, any model, any harness) work toward a single goal by
@@ -31,19 +31,36 @@ workers' output catches almost nothing. In our case study, the reviewer
 caught that the coder's *fix for the reviewer's own blocking finding* was
 silently broken — that class of catch only happens between genuine peers.
 
-## Quickstart: run a crew from your terminal
+## Try it in 30 seconds (no API keys)
 
-The repo ships `communicate`, a zero-dependency CLI (Python 3.11+) that
-turns the protocol into a working crew: **define agents, define a goal,
-let them work.**
+```bash
+git clone https://github.com/Drays-Technology/multi_agent_communication.git
+cd multi_agent_communication
+./communicate demo
+```
+
+Two built-in agents collaborate on a tiny real task: the implementer ships
+code with a **real bug**, the reviewer **executes it**, catches the bug,
+files a BLOCKING finding, and only approves the goal after independently
+re-verifying the fix. The whole story lands in a readable
+`communicate-demo/communicate.md`. That's the protocol, live, in seconds —
+no accounts, no keys, no cost.
+
+## Run your own crew
+
+`communicate` is a zero-dependency CLI (Python 3.11+): **define agents,
+define a goal, let them work.**
 
 ```bash
 cd your-project
-/path/to/communicate init     # scaffolds crew.toml + communicate.md
-$EDITOR crew.toml             # set the goal, name the agents
+/path/to/communicate init     # guided setup: asks your goal, detects your
+                              # agent CLIs, writes crew.toml
 /path/to/communicate run      # agents take turns until done
 /path/to/communicate status   # goal, roster, ledger tail
 ```
+
+Heads-up on cost: `run` invokes your agent CLI once per turn — normal API
+charges apply, so start with a small goal.
 
 `crew.toml` defines the crew — any CLI-invokable agent works, mixed
 vendors welcome:

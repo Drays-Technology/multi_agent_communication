@@ -8,7 +8,9 @@ the communicate.md protocol (SPEC.md). The ledger — not this process — is th
 source of truth, so a crashed run resumes by simply running again.
 
 Usage:
-    communicate init              scaffold crew.toml + communicate.md here
+    communicate demo              watch two built-in agents collaborate
+                                  (no API keys, finishes in seconds)
+    communicate init              guided setup: goal + agents -> crew.toml
     communicate run               run agents until GOAL-COMPLETE is APPROVED
     communicate run --rounds 5    override max rounds
     communicate status            show goal, agents, and the ledger tail
@@ -22,47 +24,53 @@ import argparse
 import datetime
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
 CONFIG = "crew.toml"
 
+# ── templates ────────────────────────────────────────────────────────────────
+
 CONFIG_TEMPLATE = """\
 # communicate.md crew — agents working toward one goal via a shared ledger.
 
 goal = \"\"\"
-Replace this with the goal. Be specific: what done looks like, constraints,
-and anything the agents must not do without asking the owner.
+{goal}
 \"\"\"
 
 ledger = "communicate.md"
-max_rounds = 12          # safety stop; a round = one turn for every agent
+max_rounds = {max_rounds}          # safety stop; a round = one turn for every agent
 timeout_minutes = 30     # per agent turn
 
 # Each agent is any command that accepts a prompt and can read/write files
-# in this directory. {prompt} is replaced with the turn prompt.
-# Claude Code examples below; any CLI-invokable agent works.
+# in this directory. {{prompt}} is replaced with the turn prompt.
 
 [[agents]]
-name = "Kestrel"
+name = "{a1_name}"
 role = "Implementer"
 brief = "You build. Ship small verified steps; ask for review via the ledger."
-command = 'claude -p {prompt} --permission-mode acceptEdits'
+command = '{a1_command}'
 
 [[agents]]
-name = "Heron"
+name = "{a2_name}"
 role = "Reviewer"
 brief = "You verify. Review diffs and behavior, not summaries. Issue verdicts."
-command = 'claude -p {prompt} --permission-mode acceptEdits'
+command = '{a2_command}'
 """
+
+DEFAULT_GOAL = """Replace this with the goal. Be specific: what done looks
+like, constraints, and anything the agents must not do without asking the
+owner."""
 
 LEDGER_TEMPLATE = """\
 # communicate.md — shared ledger
 
 <!-- Append-only. Entries: ## <Agent> — <Title> (<YYYY-MM-DD>).
-     Protocol: https://github.com/Drays/communicate.md -->
+     Protocol: https://github.com/Drays-Technology/multi_agent_communication -->
 
 ## Owner — Goal set ({date})
 
@@ -102,16 +110,29 @@ Ending the collaboration:
 This is round {round} of at most {max_rounds}.
 """
 
+# Agent CLIs the init wizard knows how to wire up, in preference order.
+KNOWN_AGENT_CLIS = [
+    ("claude", "claude -p {prompt} --permission-mode acceptEdits"),
+    ("aider", "aider --message {prompt} --yes-always"),
+]
+
+
+# ── helpers ──────────────────────────────────────────────────────────────────
 
 def die(msg: str) -> None:
     print(f"communicate: {msg}", file=sys.stderr)
     sys.exit(1)
 
 
+def today() -> str:
+    return datetime.date.today().isoformat()
+
+
 def load_config(root: Path) -> dict:
     path = root / CONFIG
     if not path.exists():
-        die(f"{CONFIG} not found — run `communicate init` first")
+        die(f"{CONFIG} not found — run `communicate init` first "
+            f"(or `communicate demo` to see how this works)")
     with path.open("rb") as fh:
         cfg = tomllib.load(fh)
     for key in ("goal", "agents"):
@@ -128,20 +149,8 @@ def load_config(root: Path) -> dict:
     return cfg
 
 
-def cmd_init(args: argparse.Namespace) -> None:
-    root = Path.cwd()
-    today = datetime.date.today().isoformat()
-    cfg_path = root / CONFIG
-    if cfg_path.exists() and not args.force:
-        die(f"{CONFIG} already exists (use --force to overwrite)")
-    cfg_path.write_text(CONFIG_TEMPLATE)
-    ledger = root / "communicate.md"
-    if not ledger.exists():
-        ledger.write_text(
-            LEDGER_TEMPLATE.format(date=today, goal="(edit crew.toml, then re-run init to stamp the goal here — or just edit this entry)")
-        )
-    print(f"scaffolded {CONFIG} and communicate.md")
-    print("next: edit crew.toml (goal + agents), then `communicate run`")
+def entry_headings(ledger_text: str) -> list[str]:
+    return re.findall(r"^## .*$", ledger_text, re.MULTILINE)
 
 
 def goal_complete(ledger_text: str, agent_names: list[str]) -> bool:
@@ -157,15 +166,100 @@ def goal_complete(ledger_text: str, agent_names: list[str]) -> bool:
     return bool(claimers) and bool(approvers - claimers)
 
 
-def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path) -> None:
-    today = datetime.date.today().isoformat()
+def append_entry(ledger: Path, agent: str, title: str, body: str) -> None:
+    with ledger.open("a") as fh:
+        fh.write(f"\n## {agent} — {title} ({today()})\n\n{body.rstrip()}\n")
+
+
+# ── init (wizard) ────────────────────────────────────────────────────────────
+
+def detect_agent_clis() -> list[tuple[str, str]]:
+    return [(name, cmd) for name, cmd in KNOWN_AGENT_CLIS if shutil.which(name)]
+
+
+def ask(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    answer = input(f"{prompt}{suffix}: ").strip()
+    return answer or default
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg_path = root / CONFIG
+    if cfg_path.exists() and not args.force:
+        die(f"{CONFIG} already exists (use --force to overwrite)")
+
+    goal = DEFAULT_GOAL
+    a1_name, a2_name = "Kestrel", "Heron"
+    fallback = "your-agent-cli {prompt}"
+    a1_command = a2_command = fallback
+
+    interactive = sys.stdin.isatty() and not args.defaults
+    if interactive:
+        print("communicate init — set up a crew in 3 questions. "
+              "(Enter accepts the [default].)\n")
+
+        print("1) What is the goal? Be specific about what 'done' looks like.")
+        print("   Type it below; finish with an empty line.")
+        lines: list[str] = []
+        while True:
+            line = input("   > ")
+            if not line.strip() and lines:
+                break
+            if line.strip():
+                lines.append(line)
+        goal = "\n".join(lines)
+
+        detected = detect_agent_clis()
+        print("\n2) Which agent CLI should power the crew?")
+        if detected:
+            for i, (name, cmd) in enumerate(detected, 1):
+                print(f"   {i}. {name}  ({cmd})")
+            print(f"   {len(detected) + 1}. other (edit crew.toml afterward)")
+            choice = ask("   pick a number", "1")
+            try:
+                a1_command = a2_command = detected[int(choice) - 1][1]
+            except (ValueError, IndexError):
+                a1_command = a2_command = fallback
+        else:
+            print("   No known agent CLI found on PATH (looked for: "
+                  + ", ".join(n for n, _ in KNOWN_AGENT_CLIS) + ").")
+            print(f"   Writing a placeholder — edit `command` in {CONFIG} before running.")
+
+        print("\n3) Name the agents (they sign the ledger with these).")
+        a1_name = ask("   implementer name", a1_name)
+        a2_name = ask("   reviewer name", a2_name)
+        if a2_name == a1_name:
+            a2_name = a1_name + "-2"
+            print(f"   names must differ — reviewer renamed to {a2_name}")
+
+    cfg_path.write_text(CONFIG_TEMPLATE.format(
+        goal=goal, max_rounds=12,
+        a1_name=a1_name, a1_command=a1_command,
+        a2_name=a2_name, a2_command=a2_command,
+    ))
+    ledger = root / "communicate.md"
+    if not ledger.exists():
+        ledger.write_text(LEDGER_TEMPLATE.format(date=today(), goal=goal))
+
+    print(f"\nwrote {CONFIG} and communicate.md")
+    if interactive and (a1_command != fallback):
+        print("next: `communicate run`  (each turn invokes your agent CLI — "
+              "normal API charges apply)")
+    else:
+        print(f"next: edit {CONFIG} (goal + agent commands), then `communicate run`")
+
+
+# ── run ──────────────────────────────────────────────────────────────────────
+
+def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path, ledger: Path) -> None:
     prompt = TURN_PROMPT.format(
         name=agent["name"],
         role=agent.get("role", "Collaborator"),
         brief=agent.get("brief", ""),
         goal=cfg["goal"].strip(),
         ledger=cfg["ledger"],
-        date=today,
+        date=today(),
         round=round_no,
         max_rounds=cfg["max_rounds"],
     )
@@ -176,16 +270,27 @@ def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path) -> None:
     if prompt not in argv:
         die(f"agent {agent['name']}: command must contain {{prompt}}")
     log_path = log_dir / f"round{round_no:02d}-{agent['name']}.log"
-    print(f"  ▸ {agent['name']} ({agent.get('role', '?')}) … ", end="", flush=True)
+    before = entry_headings(ledger.read_text()) if ledger.exists() else []
+    print(f"  ▸ {agent['name']} ({agent.get('role', '?')}) working … "
+          f"(watch: tail -f {log_path})", flush=True)
+    started = time.monotonic()
     try:
         with log_path.open("w") as log:
             subprocess.run(
                 argv, stdout=log, stderr=subprocess.STDOUT,
                 timeout=cfg["timeout_minutes"] * 60, check=False,
             )
-        print(f"done (log: {log_path})")
+        elapsed = time.monotonic() - started
+        after = entry_headings(ledger.read_text()) if ledger.exists() else []
+        new = after[len(before):]
+        if new:
+            for heading in new:
+                print(f"    ↳ {heading}")
+        else:
+            print(f"    ↳ (no ledger entry written — see {log_path})")
+        print(f"    {elapsed:.0f}s")
     except subprocess.TimeoutExpired:
-        print(f"TIMEOUT after {cfg['timeout_minutes']}m (log: {log_path})")
+        print(f"    ↳ TIMEOUT after {cfg['timeout_minutes']}m (log: {log_path})")
     except FileNotFoundError:
         die(f"agent {agent['name']}: command not found: {argv[0]}")
 
@@ -206,19 +311,21 @@ def cmd_run(args: argparse.Namespace) -> None:
         "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]
     )
     print(f"goal: {cfg['goal'].strip().splitlines()[0]} …")
-    print(f"agents: {roster}")
+    print(f"agents: {roster}\n")
 
     for round_no in range(1, cfg["max_rounds"] + 1):
         print(f"round {round_no}/{cfg['max_rounds']}")
         for agent in cfg["agents"]:
-            run_turn(agent, cfg, round_no, log_dir)
+            run_turn(agent, cfg, round_no, log_dir, ledger)
             if goal_complete(ledger.read_text(), names):
-                print("\nGOAL-COMPLETE claimed and independently APPROVED — stopping.")
-                print(f"read the full story: {ledger}")
+                print("\n✓ GOAL-COMPLETE claimed and independently APPROVED — stopping.")
+                print(f"  read the full story: {ledger}")
                 return
     print(f"\nmax rounds ({cfg['max_rounds']}) reached without an approved "
           f"GOAL-COMPLETE. The ledger holds the state — re-run to continue.")
 
+
+# ── status ───────────────────────────────────────────────────────────────────
 
 def cmd_status(_: argparse.Namespace) -> None:
     root = Path.cwd()
@@ -231,7 +338,7 @@ def cmd_status(_: argparse.Namespace) -> None:
     print(f"agents: {roster}")
     if ledger.exists():
         text = ledger.read_text()
-        entries = re.findall(r"^## .*$", text, re.MULTILINE)
+        entries = entry_headings(text)
         print(f"ledger: {len(entries)} entries; last 5:")
         for line in entries[-5:]:
             print(f"  {line}")
@@ -241,17 +348,179 @@ def cmd_status(_: argparse.Namespace) -> None:
         print("ledger: (missing)")
 
 
+# ── demo ─────────────────────────────────────────────────────────────────────
+# Two built-in agents collaborate on a tiny real task (fizzbuzz) using the
+# REAL run loop. No API keys. The implementer ships a genuinely buggy first
+# version; the reviewer actually executes the code, catches it, and issues a
+# BLOCKING finding — so the demo shows the protocol's whole point.
+
+BUGGY_FIZZBUZZ = '''\
+def fizzbuzz(n: int) -> str:
+    if n % 3 == 0:
+        return "Fizz"
+    if n % 5 == 0:
+        return "Buzz"
+    if n % 15 == 0:
+        return "FizzBuzz"
+    return str(n)
+
+
+if __name__ == "__main__":
+    for i in range(1, 21):
+        print(fizzbuzz(i))
+'''
+
+FIXED_FIZZBUZZ = '''\
+def fizzbuzz(n: int) -> str:
+    if n % 15 == 0:
+        return "FizzBuzz"
+    if n % 3 == 0:
+        return "Fizz"
+    if n % 5 == 0:
+        return "Buzz"
+    return str(n)
+
+
+if __name__ == "__main__":
+    for i in range(1, 21):
+        print(fizzbuzz(i))
+'''
+
+
+def run_fizzbuzz(root: Path) -> tuple[str, str]:
+    """Execute the demo's fizzbuzz.py; return (line15, full output)."""
+    result = subprocess.run(
+        [sys.executable, "fizzbuzz.py"], cwd=root,
+        capture_output=True, text=True, timeout=10,
+    )
+    lines = result.stdout.splitlines()
+    return (lines[14] if len(lines) >= 15 else "", result.stdout)
+
+
+def demo_agent_turn(name: str, root: Path) -> None:
+    """Scripted-but-real agent: acts on the ACTUAL ledger + files each turn."""
+    ledger = root / "communicate.md"
+    text = ledger.read_text()
+    src = root / "fizzbuzz.py"
+
+    if name == "Kestrel":
+        if "## Kestrel — PROPOSED" not in text:
+            src.write_text(BUGGY_FIZZBUZZ)
+            append_entry(ledger, "Kestrel", "PROPOSED: fizzbuzz.py first cut",
+                "Wrote `fizzbuzz.py` (classic rules, printed for 1-20).\n"
+                "Ran it — output looks right at a glance.\n\n"
+                "**Review ask:** behavior check before we call the goal met.")
+        elif "## Heron — BLOCKING" in text and "## Kestrel — COUNTER-REVIEW" not in text:
+            src.write_text(FIXED_FIZZBUZZ)
+            line15, _ = run_fizzbuzz(root)
+            append_entry(ledger, "Kestrel", "COUNTER-REVIEW: divisibility order fixed",
+                "You were right — the `% 15` check was unreachable below the\n"
+                "`% 3` branch. Reordered most-specific-first and re-ran:\n"
+                f"line 15 now prints `{line15}`. Review me back.")
+        elif "## Heron — APPROVED: fix verified" in text and "GOAL-COMPLETE" not in text:
+            _, output = run_fizzbuzz(root)
+            append_entry(ledger, "Kestrel", "GOAL-COMPLETE: fizzbuzz verified",
+                "Full run 1-20 checked against the rules line by line —\n"
+                "all correct. Claiming the goal; needs your independent\n"
+                "approval to close.")
+
+    if name == "Heron":
+        if "## Kestrel — PROPOSED" in text and "## Heron — BLOCKING" not in text:
+            line15, _ = run_fizzbuzz(root)
+            if line15 != "FizzBuzz":
+                append_entry(ledger, "Heron", "BLOCKING: 15 prints the wrong thing",
+                    "Reviewed by EXECUTION, not by reading the summary.\n\n"
+                    "**Defect:** the `% 15` branch sits below `% 3`, so it can\n"
+                    "never be reached.\n"
+                    f"**Failure scenario:** input 15 → prints `{line15}`, "
+                    "spec says `FizzBuzz`.\n"
+                    "**Fix shape I'd approve:** most-specific divisor first.")
+        elif "## Kestrel — COUNTER-REVIEW" in text and "## Heron — APPROVED: fix verified" not in text:
+            line15, _ = run_fizzbuzz(root)
+            verdict = ("APPROVED: fix verified" if line15 == "FizzBuzz"
+                       else "BLOCKING: still wrong")
+            append_entry(ledger, "Heron", verdict,
+                f"Re-executed `fizzbuzz.py`: line 15 → `{line15}`. "
+                "Checked the diff too — order is most-specific-first. No findings.")
+        elif "## Kestrel — GOAL-COMPLETE" in text and "## Heron — APPROVED: GOAL-COMPLETE" not in text:
+            line15, _ = run_fizzbuzz(root)
+            if line15 == "FizzBuzz":
+                append_entry(ledger, "Heron", "APPROVED: GOAL-COMPLETE",
+                    "Independent final verification: executed the program, "
+                    "checked all 20 lines against the rules. Goal met.")
+
+
+def cmd_demo(_: argparse.Namespace) -> None:
+    import os
+
+    root = Path.cwd() / "communicate-demo"
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir()
+
+    goal = ("Write fizzbuzz.py (print 1-20 with the classic rules) and get it "
+            "verified by execution, not by trust.")
+    (root / "communicate.md").write_text(
+        LEDGER_TEMPLATE.format(date=today(), goal=goal)
+    )
+    me = shlex.quote(str(Path(__file__).resolve()))
+    py = shlex.quote(sys.executable)
+    (root / CONFIG).write_text(CONFIG_TEMPLATE.format(
+        goal=goal, max_rounds=4,
+        a1_name="Kestrel", a1_command=f"{py} {me} _demo-agent Kestrel {{prompt}}",
+        a2_name="Heron", a2_command=f"{py} {me} _demo-agent Heron {{prompt}}",
+    ))
+
+    print("communicate demo — two built-in agents, one goal, zero API keys.")
+    print("Kestrel implements; Heron reviews BY EXECUTING the code.")
+    print(f"Everything happens in ./{root.name}/ — recreated each demo.\n")
+
+    old = Path.cwd()
+    os.chdir(root)
+    try:
+        cmd_run(argparse.Namespace(rounds=None))
+    finally:
+        os.chdir(old)
+
+    print(f"\nWhat just happened (full story: {root / 'communicate.md'}):")
+    print("  1. Kestrel shipped fizzbuzz.py with a REAL bug (unreachable %15 branch)")
+    print("  2. Heron executed it, caught 15 → 'Fizz', filed a BLOCKING finding")
+    print("  3. Kestrel fixed it and asked for counter-review")
+    print("  4. Heron re-executed, approved, and only then approved GOAL-COMPLETE")
+    print("\nThat review catch is the whole point: peers verify, nobody grades")
+    print("their own homework. Next: `communicate init` to run YOUR crew.")
+
+
+def cmd_demo_agent(args: argparse.Namespace) -> None:
+    demo_agent_turn(args.name, Path.cwd())
+
+
+# ── main ─────────────────────────────────────────────────────────────────────
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="communicate", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p_init = sub.add_parser("init", help="scaffold crew.toml + ledger")
-    p_init.add_argument("--force", action="store_true")
+
+    p_demo = sub.add_parser("demo", help="watch two built-in agents collaborate (no API keys)")
+    p_demo.set_defaults(fn=cmd_demo)
+
+    p_init = sub.add_parser("init", help="guided setup: goal + agents -> crew.toml")
+    p_init.add_argument("--force", action="store_true", help="overwrite existing crew.toml")
+    p_init.add_argument("--defaults", action="store_true", help="skip the wizard, write the template")
     p_init.set_defaults(fn=cmd_init)
+
     p_run = sub.add_parser("run", help="run agents toward the goal")
     p_run.add_argument("--rounds", type=int, default=None)
     p_run.set_defaults(fn=cmd_run)
+
     p_status = sub.add_parser("status", help="show goal, agents, ledger tail")
     p_status.set_defaults(fn=cmd_status)
+
+    p_da = sub.add_parser("_demo-agent")  # internal: a scripted demo agent turn
+    p_da.add_argument("name")
+    p_da.add_argument("prompt", nargs="?")
+    p_da.set_defaults(fn=cmd_demo_agent)
+
     args = parser.parse_args()
     args.fn(args)
 
