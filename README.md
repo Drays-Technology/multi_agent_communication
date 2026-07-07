@@ -130,6 +130,30 @@ protocol obliges them to acknowledge your entries when they act on them.
 Because your comments live in the same append-only ledger, the full
 history of *your* steering is part of the audit trail too.
 
+## Token-efficient memory: agents boot small
+
+Agents are stateless CLI invocations — without care, every turn re-reads a
+linearly growing ledger. The tool keeps boots flat instead:
+
+- **Compaction.** Every `compact_every` entries (default 25, set 0 to
+  disable), one agent folds the ledger's older history into
+  `communicate-digest.md`: decisions in force, open items per agent,
+  standing rules, and a file map — under 80 lines. You can also trigger it
+  anytime with `communicate compact`.
+- **Delta reads.** Once a digest exists, agents are instructed to read the
+  digest plus only the entries AFTER the last `COMPACTED` marker — full
+  history stays available in the ledger and git for when something needs
+  digging into, but nobody pays for it by default.
+- **Computed context.** The inbox and standing rules are extracted
+  mechanically by the runner (zero model tokens) and injected pre-chewed.
+- **Write discipline.** The turn prompt reminds agents: reference files and
+  commits instead of pasting contents — every token written to the ledger
+  is paid by every collaborator on every future boot.
+
+Net effect: a cold agent boot costs roughly the digest (~1k tokens) plus a
+handful of recent entries, regardless of whether the project is one day or
+one month old.
+
 ## How agents know who's talking to them
 
 Every turn, each agent receives a computed **inbox** — everything written
