@@ -48,6 +48,7 @@ if sys.version_info < (3, 11):
 
 import argparse
 import datetime
+import threading
 import re
 import shlex
 import subprocess
@@ -56,6 +57,15 @@ import tomllib
 from pathlib import Path
 
 CONFIG = "crew.toml"
+CONFIG_DIR = ".communicate"
+
+
+def find_config(root):
+    """crew.toml lives in .communicate/ (new default) or the root (legacy)."""
+    for cand in (root / CONFIG_DIR / CONFIG, root / CONFIG):
+        if cand.exists():
+            return cand
+    return None
 
 # ── templates ────────────────────────────────────────────────────────────────
 
@@ -168,7 +178,7 @@ history. Then read only the ledger entries AFTER the last "COMPACTED" entry.
 Dig into full history only when the digest or an inbox item points you at
 something specific; the oldest entries may have been relocated to a JSONL
 archive (see the ledger's ARCHIVED pointer) — search them with
-`grep -i <text> communicate-archive/archive.jsonl` when needed. Keep your
+`communicate history <text>` (or grep the archive path from the\nARCHIVED pointer) when needed. Keep your
 own entry concise: reference files and commits instead of pasting their
 contents — every token you write here is a token every collaborator pays
 to read on every future boot."""
@@ -197,6 +207,15 @@ Then append exactly ONE entry to ./{ledger}:
 with a one-line note of the entry range folded in. Do NO other work.
 """
 
+# How each CLI takes a model override, and what to suggest.
+MODEL_FLAGS = {"claude": "--model", "codex": "--model", "aider": "--model", "gemini": "-m"}
+MODEL_HINTS = {
+    "claude": "sonnet / opus / haiku, or a full model id",
+    "codex": "e.g. gpt-5.5-codex; Enter = your codex default",
+    "gemini": "e.g. gemini-2.5-pro",
+    "aider": "any litellm model id",
+}
+
 # Agent CLIs the init wizard knows how to wire up, in preference order.
 # Mixing vendors across agents is encouraged — a crew where the reviewer
 # runs on a different model than the implementer catches more.
@@ -222,10 +241,10 @@ def today() -> str:
 
 
 def load_config(root: Path) -> dict:
-    path = root / CONFIG
-    if not path.exists():
-        die(f"{CONFIG} not found — run `communicate init` first "
-            f"(or `communicate demo` to see how this works)")
+    path = find_config(root)
+    if path is None:
+        die(f"no crew here ({CONFIG_DIR}/{CONFIG} not found) — run "
+            f"`communicate init` first (or `communicate demo` to see how this works)")
     with path.open("rb") as fh:
         cfg = tomllib.load(fh)
     for key in ("goal", "agents"):
@@ -241,10 +260,10 @@ def load_config(root: Path) -> dict:
     cfg.setdefault("ledger", "communicate.md")
     cfg.setdefault("max_rounds", 12)
     cfg.setdefault("timeout_minutes", 30)
-    cfg.setdefault("digest", "communicate-digest.md")
+    cfg.setdefault("digest", f"{CONFIG_DIR}/digest.md")
     cfg.setdefault("compact_every", 25)   # entries between compactions; 0 = off
     cfg.setdefault("archive_after", 120)  # live-ledger entries that trigger archival; 0 = off
-    cfg.setdefault("archive", "communicate-archive/archive.jsonl")
+    cfg.setdefault("archive", f"{CONFIG_DIR}/archive.jsonl")
     return cfg
 
 
@@ -430,9 +449,10 @@ def ask(prompt: str, default: str = "") -> str:
 
 def cmd_init(args: argparse.Namespace) -> None:
     root = Path.cwd()
-    cfg_path = root / CONFIG
-    if cfg_path.exists() and not args.force:
-        die(f"{CONFIG} already exists (use --force to overwrite)")
+    if find_config(root) is not None and not args.force:
+        die(f"a crew already exists here (use --force to overwrite)")
+    cfg_path = root / CONFIG_DIR / CONFIG
+    cfg_path.parent.mkdir(exist_ok=True)
 
     goal = DEFAULT_GOAL
     a1_name, a2_name = "Kestrel", "Heron"
@@ -466,9 +486,14 @@ def cmd_init(args: argparse.Namespace) -> None:
             def pick(label: str) -> str:
                 choice = ask(f"   {label} uses", "1")
                 try:
-                    return detected[int(choice) - 1][1]
+                    cli_name, cmd = detected[int(choice) - 1]
                 except (ValueError, IndexError):
                     return fallback
+                hint = MODEL_HINTS.get(cli_name, "Enter = CLI default")
+                model = ask(f"   {label} model ({hint})", "")
+                if model:
+                    cmd += f" {MODEL_FLAGS.get(cli_name, '--model')} {model}"
+                return cmd
 
             a1_command = pick("implementer")
             a2_command = pick("reviewer")
@@ -493,7 +518,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     if not ledger.exists():
         ledger.write_text(LEDGER_TEMPLATE.format(date=today(), goal=goal))
 
-    print(f"\nwrote {CONFIG} and communicate.md")
+    print(f"\nwrote {CONFIG_DIR}/{CONFIG} and communicate.md — the ledger is "
+          f"the only file kept in your project root; config, digest, archive "
+          f"and logs all live under {CONFIG_DIR}/")
     if interactive and (a1_command != fallback):
         print("next: `communicate run`  (each turn invokes your agent CLI — "
               "normal API charges apply)")
@@ -534,15 +561,32 @@ def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path, ledger: Path)
         die(f"agent {agent['name']}: command must contain {{prompt}}")
     log_path = log_dir / f"round{round_no:02d}-{agent['name']}.log"
     before = entry_headings(ledger.read_text()) if ledger.exists() else []
+    stream = cfg.get("stream", True)
     print(f"  ▸ {agent['name']} ({agent.get('role', '?')}) working … "
-          f"(watch: tail -f {log_path})", flush=True)
+          + ("" if stream else f"(watch: tail -f {log_path})"), flush=True)
     started = time.monotonic()
     try:
         with log_path.open("w") as log:
-            subprocess.run(
-                argv, stdout=log, stderr=subprocess.STDOUT,
-                timeout=cfg["timeout_minutes"] * 60, check=False,
-            )
+            proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True)
+
+            def _tee() -> None:
+                assert proc.stdout is not None
+                for raw in proc.stdout:
+                    log.write(raw)
+                    log.flush()
+                    line = raw.rstrip()
+                    if stream and line:
+                        print(f"    │ {line[:160]}", flush=True)
+
+            reader = threading.Thread(target=_tee, daemon=True)
+            reader.start()
+            try:
+                proc.wait(timeout=cfg["timeout_minutes"] * 60)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                raise
+            reader.join(timeout=5)
         elapsed = time.monotonic() - started
         after = entry_headings(ledger.read_text()) if ledger.exists() else []
         new = after[len(before):]
@@ -781,8 +825,8 @@ def cmd_claim(args: argparse.Namespace) -> None:
     identity and this is unnecessary)."""
     root = Path.cwd()
     ledger = root / "communicate.md"
-    cfg_path = root / CONFIG
-    if cfg_path.exists():
+    cfg_path = find_config(root)
+    if cfg_path is not None:
         with cfg_path.open("rb") as fh:
             ledger = root / tomllib.load(fh).get("ledger", "communicate.md")
     if not ledger.exists():
@@ -1061,8 +1105,8 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     check(sys.version_info >= (3, 11), f"python {sys.version.split()[0]} (need 3.11+)")
 
     root = Path.cwd()
-    if not (root / CONFIG).exists():
-        check(False, CONFIG, "not found — run `communicate init` first")
+    if find_config(root) is None:
+        check(False, f"{CONFIG_DIR}/{CONFIG}", "not found — run `communicate init` first")
         sys.exit(1)
     cfg = load_config(root)  # exits with a precise message on structural errors
     check(True, f"{CONFIG} parsed — {len(cfg['agents'])} agents, "
@@ -1108,7 +1152,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
 def cmd_overview() -> None:
     """Bare `communicate` in a project directory: orient, don't error."""
     root = Path.cwd()
-    if (root / CONFIG).exists():
+    if find_config(root) is not None:
         cfg = load_config(root)
         roster = ", ".join(
             "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]

@@ -90,11 +90,17 @@ communicate               # bare command orients you: no crew here yet →
 ```bash
 communicate init
 # 1) What is the goal?           → type it; be specific about "done".
-# 2) Which CLI powers each agent? → it detects claude/codex/aider/gemini
-#      implementer uses [1]: 1        on your PATH. Pick per agent —
-#      reviewer uses    [1]: 2        Claude builds, Codex reviews.
+# 2) Which CLI powers each agent? → detects claude/codex/aider/gemini on
+#      implementer uses [1]: 1        your PATH; pick per agent, then pick
+#      implementer model: opus        the MODEL per agent (sonnet/opus/…,
+#      reviewer uses    [1]: 2        Enter = the CLI's default).
+#      reviewer model:
 # 3) Name the agents             → Enter accepts Kestrel/Heron.
 ```
+
+Tidy by design: the only file the tool keeps in your project root is
+`communicate.md` (the ledger — it *should* be visible and committed).
+Config, digest, archive, and logs all live under `.communicate/`.
 
 **4. Preflight** — catch auth/flag problems before burning a real run:
 
@@ -109,8 +115,11 @@ communicate doctor --live # + one real round-trip per agent (a few tokens)
 ```bash
 communicate run
 # round 1/12
-#   ▸ Kestrel (Implementer) working … (watch: tail -f .communicate/logs/…)
-#     ↳ ## Kestrel — PROPOSED: api scaffold + failing tests
+#   ▸ Kestrel (Implementer) working …
+#     │ Reading existing routes in src/api/…      ← the agent's own output,
+#     │ Writing tests/test_todos.py …               streamed live in plain
+#     │ Running pytest: 4 passed, 1 failed …        text (stream = false in
+#     ↳ ## Kestrel — PROPOSED: api scaffold          crew.toml to quiet it)
 #   ▸ Heron (Reviewer) working …
 #     ↳ ## Heron — BLOCKING: POST /todos ignores the title field
 ```
