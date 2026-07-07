@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""communicate — run multiple AI agents toward one goal via a shared ledger.
+
+The runner does deliberately little: it schedules turns and hands each agent
+its identity, role, the goal, and the ledger path. The agents do real work in
+the working directory and coordinate by appending entries to the ledger, per
+the communicate.md protocol (SPEC.md). The ledger — not this process — is the
+source of truth, so a crashed run resumes by simply running again.
+
+Usage:
+    communicate init              scaffold crew.toml + communicate.md here
+    communicate run               run agents until GOAL-COMPLETE is APPROVED
+    communicate run --rounds 5    override max rounds
+    communicate status            show goal, agents, and the ledger tail
+
+Requires Python 3.11+ (stdlib only).
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import re
+import shlex
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+CONFIG = "crew.toml"
+
+CONFIG_TEMPLATE = """\
+# communicate.md crew — agents working toward one goal via a shared ledger.
+
+goal = \"\"\"
+Replace this with the goal. Be specific: what done looks like, constraints,
+and anything the agents must not do without asking the owner.
+\"\"\"
+
+ledger = "communicate.md"
+max_rounds = 12          # safety stop; a round = one turn for every agent
+timeout_minutes = 30     # per agent turn
+
+# Each agent is any command that accepts a prompt and can read/write files
+# in this directory. {prompt} is replaced with the turn prompt.
+# Claude Code examples below; any CLI-invokable agent works.
+
+[[agents]]
+name = "Kestrel"
+role = "Implementer"
+brief = "You build. Ship small verified steps; ask for review via the ledger."
+command = 'claude -p {prompt} --permission-mode acceptEdits'
+
+[[agents]]
+name = "Heron"
+role = "Reviewer"
+brief = "You verify. Review diffs and behavior, not summaries. Issue verdicts."
+command = 'claude -p {prompt} --permission-mode acceptEdits'
+"""
+
+LEDGER_TEMPLATE = """\
+# communicate.md — shared ledger
+
+<!-- Append-only. Entries: ## <Agent> — <Title> (<YYYY-MM-DD>).
+     Protocol: https://github.com/Drays/communicate.md -->
+
+## Owner — Goal set ({date})
+
+{goal}
+"""
+
+TURN_PROMPT = """\
+You are the agent "{name}" (role: {role}) in a multi-agent collaboration
+governed by the communicate.md protocol. {brief}
+
+THE SHARED GOAL:
+{goal}
+
+THE LEDGER: ./{ledger} — read its tail FIRST; your collaborators' latest
+entries, verdicts, and review asks are there. Protocol rules, short form:
+
+- Do real work toward the goal in this directory this turn (write code, run
+  tests, review diffs — whatever your role calls for). Prefer one meaningful
+  verified step over many unverified ones.
+- Then append exactly ONE entry to ./{ledger}:
+  "## {name} — <specific title> ({date})" describing what you did, what you
+  found, and any verdicts. Use the verdict words when they apply:
+  PROPOSED / APPROVED / BLOCKING / COUNTER-REVIEW / ENDORSED / DISPOSITIONED.
+- Never edit or delete existing entries; correct mistakes by superseding.
+- Never approve your own change; review actual diffs/behavior, not summaries.
+- Address open review asks directed at you before starting new work.
+- Anything irreversible or outside the goal's stated constraints: do NOT do
+  it — record it as "pending owner" in your entry instead.
+
+Ending the collaboration:
+- If you believe the goal is fully met AND you have verified it, title your
+  entry "## {name} — GOAL-COMPLETE: <one-line summary>".
+- If a collaborator claimed GOAL-COMPLETE and your own verification agrees,
+  title yours "## {name} — APPROVED: GOAL-COMPLETE". The run stops only on
+  that pair, so do not approve lightly.
+
+This is round {round} of at most {max_rounds}.
+"""
+
+
+def die(msg: str) -> None:
+    print(f"communicate: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def load_config(root: Path) -> dict:
+    path = root / CONFIG
+    if not path.exists():
+        die(f"{CONFIG} not found — run `communicate init` first")
+    with path.open("rb") as fh:
+        cfg = tomllib.load(fh)
+    for key in ("goal", "agents"):
+        if key not in cfg:
+            die(f"{CONFIG} missing required key: {key}")
+    if len(cfg["agents"]) < 2:
+        die("at least two agents are required — peer review needs a peer")
+    names = [a["name"] for a in cfg["agents"]]
+    if len(names) != len(set(names)):
+        die(f"agent names must be unique, got: {names}")
+    cfg.setdefault("ledger", "communicate.md")
+    cfg.setdefault("max_rounds", 12)
+    cfg.setdefault("timeout_minutes", 30)
+    return cfg
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    today = datetime.date.today().isoformat()
+    cfg_path = root / CONFIG
+    if cfg_path.exists() and not args.force:
+        die(f"{CONFIG} already exists (use --force to overwrite)")
+    cfg_path.write_text(CONFIG_TEMPLATE)
+    ledger = root / "communicate.md"
+    if not ledger.exists():
+        ledger.write_text(
+            LEDGER_TEMPLATE.format(date=today, goal="(edit crew.toml, then re-run init to stamp the goal here — or just edit this entry)")
+        )
+    print(f"scaffolded {CONFIG} and communicate.md")
+    print("next: edit crew.toml (goal + agents), then `communicate run`")
+
+
+def goal_complete(ledger_text: str, agent_names: list[str]) -> bool:
+    """Done = one agent claimed GOAL-COMPLETE and a DIFFERENT agent approved."""
+    claimers = set(
+        re.findall(r"^## (\S+) — GOAL-COMPLETE", ledger_text, re.MULTILINE)
+    )
+    approvers = set(
+        re.findall(r"^## (\S+) — APPROVED: GOAL-COMPLETE", ledger_text, re.MULTILINE)
+    )
+    claimers &= set(agent_names)
+    approvers &= set(agent_names)
+    return bool(claimers) and bool(approvers - claimers)
+
+
+def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path) -> None:
+    today = datetime.date.today().isoformat()
+    prompt = TURN_PROMPT.format(
+        name=agent["name"],
+        role=agent.get("role", "Collaborator"),
+        brief=agent.get("brief", ""),
+        goal=cfg["goal"].strip(),
+        ledger=cfg["ledger"],
+        date=today,
+        round=round_no,
+        max_rounds=cfg["max_rounds"],
+    )
+    argv = [
+        prompt if token == "{prompt}" else token
+        for token in shlex.split(agent["command"])
+    ]
+    if prompt not in argv:
+        die(f"agent {agent['name']}: command must contain {{prompt}}")
+    log_path = log_dir / f"round{round_no:02d}-{agent['name']}.log"
+    print(f"  ▸ {agent['name']} ({agent.get('role', '?')}) … ", end="", flush=True)
+    try:
+        with log_path.open("w") as log:
+            subprocess.run(
+                argv, stdout=log, stderr=subprocess.STDOUT,
+                timeout=cfg["timeout_minutes"] * 60, check=False,
+            )
+        print(f"done (log: {log_path})")
+    except subprocess.TimeoutExpired:
+        print(f"TIMEOUT after {cfg['timeout_minutes']}m (log: {log_path})")
+    except FileNotFoundError:
+        die(f"agent {agent['name']}: command not found: {argv[0]}")
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    if args.rounds:
+        cfg["max_rounds"] = args.rounds
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found — run `communicate init`")
+    log_dir = root / ".communicate" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    names = [a["name"] for a in cfg["agents"]]
+
+    roster = ", ".join(
+        "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]
+    )
+    print(f"goal: {cfg['goal'].strip().splitlines()[0]} …")
+    print(f"agents: {roster}")
+
+    for round_no in range(1, cfg["max_rounds"] + 1):
+        print(f"round {round_no}/{cfg['max_rounds']}")
+        for agent in cfg["agents"]:
+            run_turn(agent, cfg, round_no, log_dir)
+            if goal_complete(ledger.read_text(), names):
+                print("\nGOAL-COMPLETE claimed and independently APPROVED — stopping.")
+                print(f"read the full story: {ledger}")
+                return
+    print(f"\nmax rounds ({cfg['max_rounds']}) reached without an approved "
+          f"GOAL-COMPLETE. The ledger holds the state — re-run to continue.")
+
+
+def cmd_status(_: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    roster = ", ".join(
+        "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]
+    )
+    print(f"goal: {cfg['goal'].strip()}")
+    print(f"agents: {roster}")
+    if ledger.exists():
+        text = ledger.read_text()
+        entries = re.findall(r"^## .*$", text, re.MULTILINE)
+        print(f"ledger: {len(entries)} entries; last 5:")
+        for line in entries[-5:]:
+            print(f"  {line}")
+        names = [a["name"] for a in cfg["agents"]]
+        print(f"complete: {'YES' if goal_complete(text, names) else 'no'}")
+    else:
+        print("ledger: (missing)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="communicate", description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p_init = sub.add_parser("init", help="scaffold crew.toml + ledger")
+    p_init.add_argument("--force", action="store_true")
+    p_init.set_defaults(fn=cmd_init)
+    p_run = sub.add_parser("run", help="run agents toward the goal")
+    p_run.add_argument("--rounds", type=int, default=None)
+    p_run.set_defaults(fn=cmd_run)
+    p_status = sub.add_parser("status", help="show goal, agents, ledger tail")
+    p_status.set_defaults(fn=cmd_status)
+    args = parser.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()

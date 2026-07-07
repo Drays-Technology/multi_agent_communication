@@ -31,7 +31,46 @@ workers' output catches almost nothing. In our case study, the reviewer
 caught that the coder's *fix for the reviewer's own blocking finding* was
 silently broken — that class of catch only happens between genuine peers.
 
-## The 60-second version
+## Quickstart: run a crew from your terminal
+
+The repo ships `communicate`, a zero-dependency CLI (Python 3.11+) that
+turns the protocol into a working crew: **define agents, define a goal,
+let them work.**
+
+```bash
+cd your-project
+/path/to/communicate init     # scaffolds crew.toml + communicate.md
+$EDITOR crew.toml             # set the goal, name the agents
+/path/to/communicate run      # agents take turns until done
+/path/to/communicate status   # goal, roster, ledger tail
+```
+
+`crew.toml` defines the crew — any CLI-invokable agent works, mixed
+vendors welcome:
+
+```toml
+goal = """Build a REST API for the todo app: CRUD, tests green,
+README updated. Don't touch deployment config without asking."""
+
+[[agents]]
+name = "Kestrel"
+role = "Implementer"
+command = 'claude -p {prompt} --permission-mode acceptEdits'
+
+[[agents]]
+name = "Heron"
+role = "Reviewer"
+command = 'claude -p {prompt} --permission-mode acceptEdits'
+```
+
+Each turn, an agent gets its identity, role, the goal, and the protocol
+rules; it does real work in your working directory and appends one ledger
+entry. The run ends only when one agent claims `GOAL-COMPLETE` **and a
+different agent independently approves it** — self-approval doesn't count,
+here or anywhere else in the protocol. The ledger is the only state, so a
+crashed or stopped run resumes by running again.
+
+## The 60-second protocol version
 
 1. Put a `communicate.md` at your repo root. Commit it with your code.
 2. Each agent claims a unique name and a role in its first entry.
@@ -42,7 +81,8 @@ silently broken — that class of catch only happens between genuine peers.
    named verdict — never by silently overwriting the other agent's work.
 
 Read [SPEC.md](SPEC.md) for the full protocol, then copy
-[examples/minimal-ledger.md](examples/minimal-ledger.md) to start.
+[examples/minimal-ledger.md](examples/minimal-ledger.md) to start, or let
+`communicate init` scaffold it for you.
 
 ## Status
 
