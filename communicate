@@ -375,8 +375,20 @@ def entry_headings(ledger_text: str) -> list[str]:
     return re.findall(r"^## .*$", ledger_text, re.MULTILINE)
 
 
+GOAL_MARKER_RE = re.compile(r"^## Owner — (?:New goal set|Goal set)", re.MULTILINE)
+
+
+def active_goal_region(ledger_text: str) -> str:
+    """The ledger from the most recent Owner goal entry onward — completion
+    of a PREVIOUS goal must not satisfy the current one."""
+    matches = list(GOAL_MARKER_RE.finditer(ledger_text))
+    return ledger_text[matches[-1].start():] if matches else ledger_text
+
+
 def goal_complete(ledger_text: str, agent_names: list[str]) -> bool:
-    """Done = one agent claimed GOAL-COMPLETE and a DIFFERENT agent approved."""
+    """Done = one agent claimed GOAL-COMPLETE and a DIFFERENT agent approved,
+    both since the CURRENT goal was set."""
+    ledger_text = active_goal_region(ledger_text)
     claimers = set(
         re.findall(r"^## (\S+) — GOAL-COMPLETE", ledger_text, re.MULTILINE)
     )
@@ -1003,6 +1015,40 @@ def cmd_add_agent(args: argparse.Namespace) -> None:
     print("     produce nobody reviewing (SPEC §3.2).")
 
 
+def cmd_goal(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg_path = find_config(root)
+    if cfg_path is None:
+        die("no crew here — run `communicate init` first")
+    cfg = load_config(root)
+    new_goal = " ".join(args.text).strip()
+    if not new_goal:
+        print(paint("current goal:", "1;36"))
+        print("  " + cfg["goal"].strip().replace("\n", "\n  "))
+        print(paint('\nset a new one: ', "2") + paint('communicate goal', "1;92")
+              + paint(' "refactor the auth module, tests green"', "33"))
+        return
+    if '"""' in new_goal:
+        die('the goal cannot contain a triple quote (\"\"\")')
+    text = cfg_path.read_text()
+    new_text, n = re.subn(r'goal\s*=\s*""".*?"""',
+                          'goal = """\n' + new_goal + '\n"""',
+                          text, count=1, flags=re.DOTALL)
+    if n == 0:
+        new_text, n = re.subn(r'goal\s*=\s*"[^"\n]*"',
+                              'goal = """\n' + new_goal + '\n"""',
+                              text, count=1)
+    if n == 0:
+        die(f"could not find a goal assignment in {cfg_path} — edit it directly")
+    cfg_path.write_text(new_text)
+    ledger = root / cfg["ledger"]
+    if ledger.exists():
+        append_entry(ledger, "Owner", "New goal set", new_goal)
+    print(paint("new goal set", "1;92") + paint(f" (recorded in {cfg['ledger']} — the crew", "2"))
+    print(paint("keeps all project memory; completion of the old goal no longer", "2"))
+    print(paint("counts). Start work: ", "2") + paint("communicate run", "1;92"))
+
+
 def cmd_ask(args: argparse.Namespace) -> None:
     root = Path.cwd()
     cfg = load_config(root)
@@ -1367,6 +1413,7 @@ def cmd_commands(_: argparse.Namespace | None = None) -> None:
     row("communicate add-agent [...]", "grow the crew (auto-names Agent3, Agent4, …)")
     sect("running")
     row("communicate run [--rounds N]", "agents take turns until GOAL-COMPLETE is approved")
+    row('communicate goal ["<new goal>"]', "show the goal, or set a new one (memory kept)")
     row("communicate status", "goal, roster, ledger tail, done-or-not")
     row("communicate watch", "live entries + your comment line (see below)")
     sect("steering (also available inside watch)")
@@ -1463,6 +1510,10 @@ def main() -> None:
     p_stop = sub.add_parser("stop", help="halt a running crew after the current turn")
     p_stop.add_argument("reason", nargs="*", help="optional reason, recorded in the ledger")
     p_stop.set_defaults(fn=cmd_stop)
+
+    p_goal = sub.add_parser("goal", help="show the goal, or set a new one (crew keeps its memory)")
+    p_goal.add_argument("text", nargs="*", help="the new goal; empty = show current")
+    p_goal.set_defaults(fn=cmd_goal)
 
     p_ask = sub.add_parser("ask", help='one-shot question to the crew: communicate ask "is X true?"')
     p_ask.add_argument("question", nargs="+", help="what you want to know")
