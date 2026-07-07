@@ -177,9 +177,13 @@ with a one-line note of the entry range folded in. Do NO other work.
 """
 
 # Agent CLIs the init wizard knows how to wire up, in preference order.
+# Mixing vendors across agents is encouraged — a crew where the reviewer
+# runs on a different model than the implementer catches more.
 KNOWN_AGENT_CLIS = [
     ("claude", "claude -p {prompt} --permission-mode acceptEdits"),
+    ("codex", "codex exec --full-auto {prompt}"),
     ("aider", "aider --message {prompt} --yes-always"),
+    ("gemini", "gemini --yolo -p {prompt}"),
 ]
 
 
@@ -429,16 +433,22 @@ def cmd_init(args: argparse.Namespace) -> None:
         goal = "\n".join(lines)
 
         detected = detect_agent_clis()
-        print("\n2) Which agent CLI should power the crew?")
+        print("\n2) Which agent CLI powers each agent? Mixing vendors is a")
+        print("   feature — a reviewer on a different model catches more.")
         if detected:
             for i, (name, cmd) in enumerate(detected, 1):
                 print(f"   {i}. {name}  ({cmd})")
             print(f"   {len(detected) + 1}. other (edit crew.toml afterward)")
-            choice = ask("   pick a number", "1")
-            try:
-                a1_command = a2_command = detected[int(choice) - 1][1]
-            except (ValueError, IndexError):
-                a1_command = a2_command = fallback
+
+            def pick(label: str) -> str:
+                choice = ask(f"   {label} uses", "1")
+                try:
+                    return detected[int(choice) - 1][1]
+                except (ValueError, IndexError):
+                    return fallback
+
+            a1_command = pick("implementer")
+            a2_command = pick("reviewer")
         else:
             print("   No known agent CLI found on PATH (looked for: "
                   + ", ".join(n for n, _ in KNOWN_AGENT_CLIS) + ").")
@@ -1013,9 +1023,35 @@ def cmd_demo_agent(args: argparse.Namespace) -> None:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+def cmd_overview() -> None:
+    """Bare `communicate` in a project directory: orient, don't error."""
+    root = Path.cwd()
+    if (root / CONFIG).exists():
+        cfg = load_config(root)
+        roster = ", ".join(
+            "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]
+        )
+        ledger = root / cfg["ledger"]
+        entries = entry_headings(ledger.read_text()) if ledger.exists() else []
+        print("communicate — this project has a crew.\n")
+        print(f"  goal:   {cfg['goal'].strip().splitlines()[0]} …")
+        print(f"  agents: {roster}")
+        print(f"  ledger: {len(entries)} entries"
+              + (f"; latest: {entries[-1]}" if entries else ""))
+        print("\n  communicate run     put the crew to work")
+        print("  communicate watch   live view while they work")
+        print("  communicate say     guide them (or: say --to <agent>, rule <agent>)")
+        print("  communicate status  full summary   ·   stop / inbox / history / --help")
+    else:
+        print("communicate — run multiple AI agents toward one goal.\n")
+        print("  new here?           communicate demo   (60s, no API keys)")
+        print("  start a crew here:  communicate init   (3 questions)")
+        print("  everything else:    communicate --help")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="communicate", description=__doc__)
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd", required=False)
 
     p_demo = sub.add_parser("demo", help="watch two built-in agents collaborate (no API keys)")
     p_demo.set_defaults(fn=cmd_demo)
@@ -1077,6 +1113,9 @@ def main() -> None:
     p_da.set_defaults(fn=cmd_demo_agent)
 
     args = parser.parse_args()
+    if args.cmd is None:
+        cmd_overview()
+        return
     args.fn(args)
 
 
