@@ -517,6 +517,35 @@ def cmd_say(args: argparse.Namespace) -> None:
     print("the newest Owner entry as its top-priority instruction.")
 
 
+def cmd_claim(args: argparse.Namespace) -> None:
+    """Claim an agent identity in the ledger (for free-running agents that
+    work OUTSIDE `communicate run` — under the runner, crew.toml assigns
+    identity and this is unnecessary)."""
+    root = Path.cwd()
+    ledger = root / "communicate.md"
+    cfg_path = root / CONFIG
+    if cfg_path.exists():
+        with cfg_path.open("rb") as fh:
+            ledger = root / tomllib.load(fh).get("ledger", "communicate.md")
+    if not ledger.exists():
+        die(f"no ledger at {ledger} — create one or run `communicate init`")
+    if args.name == "Owner":
+        die('"Owner" is reserved for the human')
+    text = ledger.read_text()
+    claimed = {author for author, _ in split_entries_by_author(text)}
+    if args.name in claimed:
+        die(f"{args.name!r} is already claimed in this ledger — "
+            f"taken: {', '.join(sorted(claimed))}. Pick another name.")
+    body = f"Role: {args.role}."
+    if args.brief:
+        body += f" {args.brief}"
+    body += ("\n\nChecked the ledger for existing claims before taking this "
+             "name, per SPEC §3.1.")
+    append_entry(ledger, args.name, f"Claiming role: {args.role}", body)
+    print(f"claimed {args.name!r} ({args.role}) in {ledger}.")
+    print("sign every entry with this exact name; others @mention you with it.")
+
+
 def cmd_inbox(args: argparse.Namespace) -> None:
     root = Path.cwd()
     cfg = load_config(root)
@@ -731,6 +760,12 @@ def main() -> None:
     p_inbox = sub.add_parser("inbox", help="what an agent must respond to (mentions, verdicts, Owner notes)")
     p_inbox.add_argument("agent", help="agent name (or Owner)")
     p_inbox.set_defaults(fn=cmd_inbox)
+
+    p_claim = sub.add_parser("claim", help="claim an agent identity in the ledger (free-running agents)")
+    p_claim.add_argument("name", help="unique agent name to claim")
+    p_claim.add_argument("--role", default="Collaborator", help='e.g. "Implementer", "Reviewer"')
+    p_claim.add_argument("--brief", default="", help="one-line working contract for this agent")
+    p_claim.set_defaults(fn=cmd_claim)
 
     p_da = sub.add_parser("_demo-agent")  # internal: a scripted demo agent turn
     p_da.add_argument("name")

@@ -144,6 +144,16 @@ role = "Reviewer"
 command = 'claude -p {prompt} --permission-mode acceptEdits'
 ```
 
+**Who is who?** Identity comes from `crew.toml`: each `[[agents]]` block
+IS an agent — the `name` is how it signs the ledger and gets @mentioned,
+the `role` is its behavioral contract, the `command` is which model powers
+it. Names must be unique; `Owner` is reserved for you; and because
+identity is the name (not the model), you can swap the underlying model
+mid-project and the agent keeps its history and obligations. Agents that
+work *outside* the runner (independent sessions) claim identity instead:
+`communicate claim Osprey --role Tester` registers the name in the ledger
+after checking nobody holds it.
+
 Each turn, an agent gets its identity, role, the goal, and the protocol
 rules; it does real work in your working directory and appends one ledger
 entry. The run ends only when one agent claims `GOAL-COMPLETE` **and a
