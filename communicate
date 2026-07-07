@@ -27,13 +27,30 @@ Requires Python 3.11+ (stdlib only).
 
 from __future__ import annotations
 
+import os
+import shutil
+import sys
+
+# macOS ships python3 = 3.9, which predates tomllib. Rather than crash with
+# an ImportError, hop onto a newer interpreter if one exists, or explain.
+if sys.version_info < (3, 11):
+    for _candidate in ("python3.14", "python3.13", "python3.12", "python3.11"):
+        _found = shutil.which(_candidate)
+        if _found:
+            os.execv(_found, [_found, os.path.abspath(__file__)] + sys.argv[1:])
+    sys.exit(
+        "communicate: needs Python 3.11+, but your default python3 is "
+        + sys.version.split()[0] + ".\n"
+        "  macOS:  brew install python\n"
+        "  Linux:  e.g. apt install python3.12\n"
+        "Then run `communicate` again — it finds python3.11+ automatically."
+    )
+
 import argparse
 import datetime
 import re
 import shlex
-import shutil
 import subprocess
-import sys
 import time
 import tomllib
 from pathlib import Path

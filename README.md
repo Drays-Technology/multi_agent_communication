@@ -39,7 +39,9 @@ silently broken — that class of catch only happens between genuine peers.
 
 ## Install
 
-One line (puts `communicate` on your PATH; needs Python 3.11+, nothing else):
+One line (puts `communicate` on your PATH; needs Python 3.11+ **installed
+somewhere** — macOS's default python3 is older, but the tool automatically
+finds `python3.11`+ on your system, e.g. from `brew install python`):
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/Drays-Technology/multi_agent_communication/main/communicate -o /usr/local/bin/communicate && sudo chmod +x /usr/local/bin/communicate
