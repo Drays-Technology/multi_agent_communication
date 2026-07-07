@@ -37,9 +37,16 @@ The key words MUST, SHOULD, and MAY are to be interpreted as in RFC 2119.
 - The ledger MUST be committed and (if a remote exists) pushed whenever the
   work it references is committed. Entries that reference commits SHOULD
   include the short hash.
-- Large projects MAY archive old entries to `communicate-archive/<date>.md`
-  once the active file exceeds a workable size, keeping the most recent
-  entries plus any entry containing an unresolved verdict in the active file.
+- Large projects SHOULD archive old entries once the active file exceeds a
+  workable size. Archival is a **lossless relocation**, never a deletion:
+  full entry text moves to a structured, queryable store (the reference
+  implementation uses one-JSON-per-entry lines in
+  `communicate-archive/archive.jsonl`), and a pointer entry in the live
+  ledger records what moved where. Constraints: only history already
+  covered by a compaction digest (§8) may be archived; Owner standing rules
+  MUST remain in the live ledger; archived entries remain immutable. This
+  is the one sanctioned structural rewrite of the ledger file — version
+  control preserves the pre-archive original regardless.
 
 ### 2.2 Entry grammar
 

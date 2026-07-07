@@ -145,9 +145,12 @@ MEMORY_HINT_DIGEST = """TOKEN-EFFICIENT BOOT: read
 open items, standing rules, file map) and REPLACES the ledger's older
 history. Then read only the ledger entries AFTER the last "COMPACTED" entry.
 Dig into full history only when the digest or an inbox item points you at
-something specific. Keep your own entry concise: reference files and commits
-instead of pasting their contents — every token you write here is a token
-every collaborator pays to read on every future boot."""
+something specific; the oldest entries may have been relocated to a JSONL
+archive (see the ledger's ARCHIVED pointer) — search them with
+`grep -i <text> communicate-archive/archive.jsonl` when needed. Keep your
+own entry concise: reference files and commits instead of pasting their
+contents — every token you write here is a token every collaborator pays
+to read on every future boot."""
 
 COMPACT_PROMPT = """\
 You are agent "{name}", serving as the crew's memory compactor this turn.
@@ -213,7 +216,78 @@ def load_config(root: Path) -> dict:
     cfg.setdefault("timeout_minutes", 30)
     cfg.setdefault("digest", "communicate-digest.md")
     cfg.setdefault("compact_every", 25)   # entries between compactions; 0 = off
+    cfg.setdefault("archive_after", 120)  # live-ledger entries that trigger archival; 0 = off
+    cfg.setdefault("archive", "communicate-archive/archive.jsonl")
     return cfg
+
+
+HEADING_RE = re.compile(r"^## (\S+) — (.*?)(?: \((\d{4}-\d{2}-\d{2})\))?$")
+
+
+def archive_ledger(cfg: dict, root: Path) -> tuple[int, Path] | None:
+    """Losslessly relocate old entries to a structured JSONL archive.
+
+    Moves every entry BEFORE the last COMPACTED marker — except Owner
+    standing rules, which stay live because they bind every future turn —
+    into one-JSON-per-entry lines that grep, jq, and `communicate history`
+    can query. The live ledger keeps: its header, a pointer entry, the
+    standing rules, the COMPACTED marker, and everything after it. Nothing
+    is summarized or dropped: the archive holds the full text, and git
+    history holds the original file anyway.
+    """
+    import json
+
+    ledger = root / cfg["ledger"]
+    text = ledger.read_text()
+    prefix_end = text.find("## ")
+    if prefix_end == -1:
+        return None
+    prefix = text[:prefix_end]
+    entries = split_entries_by_author(text)
+
+    last_compacted = -1
+    for i, (_, entry) in enumerate(entries):
+        if "— COMPACTED:" in entry.splitlines()[0]:
+            last_compacted = i
+    if last_compacted <= 0:
+        return None  # nothing safely archivable without a digest covering it
+
+    to_archive, to_keep = [], []
+    for i, (author, entry) in enumerate(entries):
+        heading = entry.splitlines()[0]
+        keep = (
+            i >= last_compacted
+            or (author == "Owner" and "— Standing rule for @" in heading)
+        )
+        (to_keep if keep else to_archive).append((author, entry))
+    if not to_archive:
+        return None
+
+    archive_path = root / cfg["archive"]
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = sum(1 for _ in archive_path.open()) if archive_path.exists() else 0
+    with archive_path.open("a") as fh:
+        for seq, (author, entry) in enumerate(to_archive, existing + 1):
+            lines = entry.splitlines()
+            m = HEADING_RE.match(lines[0])
+            fh.write(json.dumps({
+                "n": seq,
+                "author": author,
+                "title": m.group(2) if m else lines[0][3:],
+                "date": (m.group(3) if m else None),
+                "body": "\n".join(lines[1:]).strip(),
+            }, ensure_ascii=False) + "\n")
+
+    pointer = (
+        f"## Ledger — ARCHIVED: {len(to_archive)} entries moved to "
+        f"{cfg['archive']} ({today()})\n\n"
+        f"Lossless relocation (full text preserved, one JSON per entry). "
+        f"Search old history with `communicate history <text>` or grep."
+    )
+    ledger.write_text(
+        prefix + pointer + "\n\n" + "\n\n".join(e for _, e in to_keep) + "\n"
+    )
+    return len(to_archive), archive_path
 
 
 def entries_since_compaction(ledger_text: str) -> int:
@@ -505,6 +579,13 @@ def cmd_run(args: argparse.Namespace) -> None:
         if cfg["compact_every"] and \
                 entries_since_compaction(ledger.read_text()) >= cfg["compact_every"]:
             run_compaction(cfg, log_dir, ledger)
+        if cfg["archive_after"] and \
+                len(entry_headings(ledger.read_text())) >= cfg["archive_after"]:
+            result = archive_ledger(cfg, root)
+            if result:
+                moved, path = result
+                print(f"  ▣ archived {moved} old entries → {path} "
+                      f"(lossless; `communicate history <text>` searches them)")
         print(f"round {round_no}/{cfg['max_rounds']}")
         for agent in cfg["agents"]:
             run_turn(agent, cfg, round_no, log_dir, ledger)
@@ -707,6 +788,54 @@ def cmd_inbox(args: argparse.Namespace) -> None:
           f"since their last turn:")
     for line in digest:
         print(f"  - {line}")
+
+
+def cmd_archive(_: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    result = archive_ledger(cfg, root)
+    if result is None:
+        print("nothing to archive — the archivable region is everything BEFORE "
+              "the last COMPACTED marker, so run `communicate compact` first "
+              "(the digest must cover history before it leaves the ledger).")
+        return
+    moved, path = result
+    live = len(entry_headings(ledger.read_text()))
+    print(f"archived {moved} entries → {path} (lossless, one JSON per entry).")
+    print(f"live ledger is now {live} entries. "
+          f"Search old history anytime: `communicate history <text>`.")
+
+
+def cmd_history(args: argparse.Namespace) -> None:
+    import json
+
+    root = Path.cwd()
+    cfg = load_config(root)
+    query = " ".join(args.query).lower()
+    hits = 0
+    archive_path = root / cfg["archive"]
+    if archive_path.exists():
+        for line in archive_path.open():
+            row = json.loads(line)
+            text = f"{row['author']} {row['title']} {row['body']}".lower()
+            if query in text:
+                hits += 1
+                print(f"[archive #{row['n']}] ## {row['author']} — "
+                      f"{row['title']}{' (' + row['date'] + ')' if row['date'] else ''}")
+                for body_line in row["body"].splitlines():
+                    if query in body_line.lower():
+                        print(f"    {body_line.strip()}")
+    ledger = root / cfg["ledger"]
+    if ledger.exists():
+        for author, entry in split_entries_by_author(ledger.read_text()):
+            if query in entry.lower():
+                hits += 1
+                print(f"[live] {entry.splitlines()[0]}")
+    print(f"{hits} match{'es' if hits != 1 else ''} for {query!r}"
+          + ("" if hits else " — try a shorter term"))
 
 
 def cmd_compact(_: argparse.Namespace) -> None:
@@ -928,6 +1057,13 @@ def main() -> None:
 
     p_compact = sub.add_parser("compact", help="fold ledger history into the digest (token-efficient boots)")
     p_compact.set_defaults(fn=cmd_compact)
+
+    p_archive = sub.add_parser("archive", help="relocate pre-digest entries to a JSONL archive (lossless)")
+    p_archive.set_defaults(fn=cmd_archive)
+
+    p_history = sub.add_parser("history", help="search live ledger + archives")
+    p_history.add_argument("query", nargs="+", help="text to search for (case-insensitive)")
+    p_history.set_defaults(fn=cmd_history)
 
     p_claim = sub.add_parser("claim", help="claim an agent identity in the ledger (free-running agents)")
     p_claim.add_argument("name", help="unique agent name to claim")

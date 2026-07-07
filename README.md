@@ -150,9 +150,26 @@ linearly growing ledger. The tool keeps boots flat instead:
   commits instead of pasting contents — every token written to the ledger
   is paid by every collaborator on every future boot.
 
+- **Archival.** When the live ledger passes `archive_after` entries
+  (default 120, 0 = off — or run `communicate archive` anytime), everything
+  already covered by the digest is **losslessly relocated** to
+  `communicate-archive/archive.jsonl` — one JSON object per entry, so old
+  history is greppable, `jq`-able, and out of the hot file. A pointer entry
+  marks the move; standing rules never leave the live ledger (they bind
+  every turn); and archiving refuses to run until a digest covers the
+  region, so no knowledge can fall between the files. Search everything —
+  live and archived — with:
+
+  ```bash
+  communicate history "tokenizer edge case"
+  # [archive #5] ## Kestrel — PROPOSED: module 3 (2026-07-07)
+  # [live] ## Heron — APPROVED: module 5 (2026-07-07)
+  ```
+
 Net effect: a cold agent boot costs roughly the digest (~1k tokens) plus a
 handful of recent entries, regardless of whether the project is one day or
-one month old.
+one month old — and nothing is ever deleted: summary in the digest, full
+text in the archive, originals in git history.
 
 ## How agents know who's talking to them
 
