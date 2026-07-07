@@ -72,6 +72,10 @@ timeout_minutes = 30     # per agent turn
 
 # Each agent is any command that accepts a prompt and can read/write files
 # in this directory. {{prompt}} is replaced with the turn prompt.
+# NOTE: headless agents can usually EDIT files but need explicit permission
+# to RUN commands — and "verify by execution" is the protocol's whole point.
+# The claude template below allowlists common test runners; widen or narrow
+# to taste (e.g. add "Bash(make *)" or drop languages you don't use).
 
 [[agents]]
 name = "{a1_name}"
@@ -197,7 +201,9 @@ with a one-line note of the entry range folded in. Do NO other work.
 # Mixing vendors across agents is encouraged — a crew where the reviewer
 # runs on a different model than the implementer catches more.
 KNOWN_AGENT_CLIS = [
-    ("claude", "claude -p {prompt} --permission-mode acceptEdits"),
+    ("claude", 'claude -p {prompt} --permission-mode acceptEdits '
+               '--allowedTools "Bash(python3 *)" "Bash(python *)" "Bash(pytest *)" '
+               '"Bash(npm *)" "Bash(node *)" "Bash(cargo *)" "Bash(go *)"'),
     ("codex", "codex exec --full-auto {prompt}"),
     ("aider", "aider --message {prompt} --yes-always"),
     ("gemini", "gemini --yolo -p {prompt}"),
