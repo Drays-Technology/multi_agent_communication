@@ -792,7 +792,7 @@ def cmd_watch(_: argparse.Namespace) -> None:
     print(paint(f"watching {cfg['ledger']}", "1;36")
           + paint("  — your keyboard is live:", "2"))
     print(paint("  type a note = guidance for everyone  ·  @Agent msg = directive"
-                "\n  /rule Agent text = standing rule  ·  /stop [reason]  ·  /quit\n", "2"))
+                "\n  /rule Agent text  ·  /ask question  ·  /status  ·  /stop  ·  /help  ·  /quit\n", "2"))
 
     entries = split_entries(ledger.read_text())
     for entry in entries[-3:]:
@@ -844,6 +844,24 @@ def cmd_watch(_: argparse.Namespace) -> None:
                 continue
             if line in ("/quit", "/q", "quit", "exit"):
                 break
+            if line in ("/status", "status"):
+                cmd_status(argparse.Namespace())
+                continue
+            if line in ("/help", "/commands", "help", "?"):
+                cmd_commands()
+                continue
+            if line in ("run", "/run"):
+                print(paint("  run the crew from ANOTHER terminal: ", "33")
+                      + paint("communicate run", "1;92")
+                      + paint("  (this window stays open to watch and steer)", "33"))
+                continue
+            if line.startswith("/ask"):
+                q = line[4:].strip()
+                if not q:
+                    print(paint("  usage: /ask is the website responsive?", "33"))
+                    continue
+                cmd_ask(argparse.Namespace(question=[q], agent=None))
+                continue
             if line.startswith("/stop"):
                 reason = line[5:].strip() or "Halt after the current turn."
                 append_entry(ledger, "Owner", "STOP", reason)
@@ -1556,9 +1574,12 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.cmd is None:
+        if sys.stdin.isatty() and find_config(Path.cwd()) is not None:
+            cmd_watch(args)          # a crewed project opens the cockpit
+            return
         cmd_overview()
         if sys.stdin.isatty():
-            interactive(parser)
+            interactive(parser)      # crewless: onboarding session
         return
     args.fn(args)
 
