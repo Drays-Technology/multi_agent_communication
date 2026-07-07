@@ -1270,6 +1270,39 @@ def cmd_doctor(args: argparse.Namespace) -> None:
           + ("" if args.live else " (add --live to test real agent round-trips)"))
 
 
+def cmd_commands(_: argparse.Namespace | None = None) -> None:
+    """The one-screen cheat sheet."""
+    def sect(title): print(paint(title, "1;36"))
+    def row(cmd, desc): print(f"  {paint(cmd.ljust(34), '1')}{paint(desc, '2')}")
+
+    sect("getting started")
+    row("communicate demo", "watch two built-in agents collaborate (free, ~1s)")
+    row("communicate init", "guided setup: goal, CLI + model per agent, names")
+    row("communicate doctor [--live]", "preflight: CLIs installed, auth works")
+    row("communicate add-agent [...]", "grow the crew (auto-names Agent3, Agent4, …)")
+    sect("running")
+    row("communicate run [--rounds N]", "agents take turns until GOAL-COMPLETE is approved")
+    row("communicate status", "goal, roster, ledger tail, done-or-not")
+    row("communicate watch", "live entries + your comment line (see below)")
+    sect("steering (also available inside watch)")
+    row("communicate say <msg>", "guidance for everyone — top-priority instruction")
+    row("communicate say --to A <msg>", "one-time directive into agent A's inbox")
+    row("communicate rule A <text>", "standing rule for A — re-asserted EVERY turn")
+    row("communicate stop [reason]", "halt after the current turn; re-run resumes")
+    row("communicate inbox <agent>", "what that agent owes: mentions, verdicts, notes")
+    sect("memory (mostly automatic)")
+    row("communicate compact", "fold old history into the digest agents boot from")
+    row("communicate archive", "relocate pre-digest entries to queryable JSONL")
+    row("communicate history <text>", "search everything ever written, live + archived")
+    sect("free-running agents (no runner)")
+    row("communicate claim <name>", "claim an identity in the ledger, collision-checked")
+    print(paint("\ninside `communicate watch`: ", "1")
+          + paint("text = guidance · @Agent msg = directive · "
+                  "/rule A text · /stop · /quit", "2"))
+    print(paint("bare `communicate` opens an interactive session — same "
+                "commands, no prefix.", "2"))
+
+
 def cmd_overview() -> None:
     """Bare `communicate` in a project directory: orient, don't error."""
     root = Path.cwd()
@@ -1288,12 +1321,12 @@ def cmd_overview() -> None:
         print("\n  communicate run     put the crew to work")
         print("  communicate watch   live view while they work")
         print("  communicate say     guide them (or: say --to <agent>, rule <agent>)")
-        print("  communicate status  full summary   ·   stop / inbox / history / --help")
+        print("  communicate status  full summary   ·   communicate commands = cheat sheet")
     else:
         print("communicate — run multiple AI agents toward one goal.\n")
         print("  new here?           communicate demo   (60s, no API keys)")
         print("  start a crew here:  communicate init   (3 questions)")
-        print("  everything else:    communicate --help")
+        print("  all commands:       communicate commands")
 
 
 def main() -> None:
@@ -1318,6 +1351,9 @@ def main() -> None:
     p_doctor.add_argument("--timeout", type=int, default=120,
                           help="seconds per live round-trip (default 120)")
     p_doctor.set_defaults(fn=cmd_doctor)
+
+    p_cmds = sub.add_parser("commands", help="one-screen cheat sheet of every command")
+    p_cmds.set_defaults(fn=cmd_commands)
 
     p_status = sub.add_parser("status", help="show goal, agents, ledger tail")
     p_status.set_defaults(fn=cmd_status)
@@ -1400,8 +1436,8 @@ def interactive(parser: argparse.ArgumentParser) -> None:
             continue
         if line in ("quit", "exit", "q"):
             return
-        if line in ("help", "?"):
-            parser.print_help()
+        if line in ("help", "?", "commands"):
+            cmd_commands()
             continue
         try:
             tokens = shlex.split(line)

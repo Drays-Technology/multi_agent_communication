@@ -289,6 +289,34 @@ different agent independently approves it** — self-approval doesn't count,
 here or anywhere else in the protocol. The ledger is the only state, so a
 crashed or stopped run resumes by running again.
 
+## Command reference
+
+`communicate commands` prints this cheat sheet in your terminal; bare
+`communicate` opens an interactive session where all of these work
+without the prefix.
+
+| command | what it does |
+|---|---|
+| `communicate demo` | watch two built-in agents collaborate (free, ~1s) |
+| `communicate init` | guided setup: goal, CLI + model per agent, names |
+| `communicate doctor [--live]` | preflight: CLIs installed, auth actually works |
+| `communicate add-agent [...]` | grow the crew (auto-names Agent3, Agent4, …) |
+| `communicate run [--rounds N]` | agents take turns until GOAL-COMPLETE is approved |
+| `communicate status` | goal, roster, ledger tail, done-or-not |
+| `communicate watch` | live entries + your always-hot comment line |
+| `communicate say <msg>` | guidance for everyone — top-priority instruction |
+| `communicate say --to A <msg>` | one-time directive into agent A's inbox |
+| `communicate rule A <text>` | standing rule for A — re-asserted every turn |
+| `communicate stop [reason]` | halt after the current turn; re-run resumes |
+| `communicate inbox <agent>` | what that agent owes: mentions, verdicts, notes |
+| `communicate compact` | fold old history into the boot digest (also automatic) |
+| `communicate archive` | relocate pre-digest entries to queryable JSONL (also automatic) |
+| `communicate history <text>` | search everything ever written, live + archived |
+| `communicate claim <name>` | free-running agents: claim an identity, collision-checked |
+
+Inside `watch`: plain text = guidance · `@Agent msg` = directive ·
+`/rule A text` · `/stop` · `/quit`.
+
 ## The 60-second protocol version
 
 1. Put a `communicate.md` at your repo root. Commit it with your code.
