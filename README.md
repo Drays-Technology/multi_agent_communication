@@ -105,6 +105,26 @@ communicate stop "pausing to review"
                                   # ledger keeps all state
 ```
 
+And when you need to shape ONE agent's behavior rather than the whole
+crew's:
+
+```bash
+communicate say --to Kestrel "stop refactoring, only fix the bug this turn"
+                                  # one-time directive: lands in Kestrel's
+                                  # inbox as [OWNER] [MENTIONS YOU]; the
+                                  # others see it and know it's not theirs
+
+communicate rule Kestrel "never touch the db schema without Heron's APPROVED"
+                                  # standing rule: injected into EVERY one
+                                  # of Kestrel's future turns, not just the
+                                  # next — it binds until you post a newer
+                                  # rule changing it (newest wins)
+```
+
+The difference matters: inbox items age out once acknowledged; standing
+rules are re-asserted every single turn, so a behavioral requirement can't
+fade as the ledger grows.
+
 The name `Owner` is reserved for you: agents can't claim it, and the
 protocol obliges them to acknowledge your entries when they act on them.
 Because your comments live in the same append-only ledger, the full

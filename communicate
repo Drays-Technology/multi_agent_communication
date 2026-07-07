@@ -99,6 +99,10 @@ something of you (this digest is computed, but READ THE FULL ENTRIES in the
 ledger before acting):
 {inbox}
 
+THE OWNER'S STANDING RULES FOR YOU — these bind on every turn until the
+Owner posts a newer rule changing them (newest wins on conflict):
+{standing_rules}
+
 Protocol rules, short form:
 
 - Do real work toward the goal in this directory this turn (write code, run
@@ -208,6 +212,26 @@ def split_entries_by_author(ledger_text: str) -> list[tuple[str, str]]:
         if m:
             out.append((m.group(1), entry.rstrip()))
     return out
+
+
+def standing_rules(ledger_text: str, agent_name: str) -> list[str]:
+    """All Owner 'Standing rule for @X' bodies for this agent, in order.
+
+    Rules bind until the Owner posts a newer rule changing them — so they
+    are injected into EVERY turn prompt, unlike inbox items, which drop out
+    of the digest once the agent has taken a turn.
+    """
+    rules = []
+    pattern = re.compile(rf"— Standing rule for @{re.escape(agent_name)}\b")
+    for author, entry in split_entries_by_author(ledger_text):
+        if author != "Owner":
+            continue
+        lines = entry.splitlines()
+        if pattern.search(lines[0]):
+            body = "\n".join(lines[1:]).strip()
+            if body:
+                rules.append(body)
+    return rules
 
 
 def compute_inbox(ledger_text: str, agent_name: str) -> list[str]:
@@ -325,9 +349,12 @@ def cmd_init(args: argparse.Namespace) -> None:
 # ── run ──────────────────────────────────────────────────────────────────────
 
 def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path, ledger: Path) -> None:
-    inbox = compute_inbox(ledger.read_text(), agent["name"]) if ledger.exists() else []
+    ledger_text = ledger.read_text() if ledger.exists() else ""
+    inbox = compute_inbox(ledger_text, agent["name"])
     inbox_text = "\n".join(f"- {line}" for line in inbox) if inbox else \
         "- (nothing new since your last turn)"
+    rules = standing_rules(ledger_text, agent["name"])
+    rules_text = "\n".join(f"- {r}" for r in rules) if rules else "- (none)"
     prompt = TURN_PROMPT.format(
         name=agent["name"],
         role=agent.get("role", "Collaborator"),
@@ -335,6 +362,7 @@ def run_turn(agent: dict, cfg: dict, round_no: int, log_dir: Path, ledger: Path)
         goal=cfg["goal"].strip(),
         ledger=cfg["ledger"],
         inbox=inbox_text,
+        standing_rules=rules_text,
         date=today(),
         round=round_no,
         max_rounds=cfg["max_rounds"],
@@ -502,6 +530,10 @@ def cmd_watch(_: argparse.Namespace) -> None:
               "`communicate status` for a summary anytime.")
 
 
+def _crew_names(cfg: dict) -> list[str]:
+    return [a["name"] for a in cfg["agents"]]
+
+
 def cmd_say(args: argparse.Namespace) -> None:
     root = Path.cwd()
     cfg = load_config(root)
@@ -511,10 +543,38 @@ def cmd_say(args: argparse.Namespace) -> None:
     message = " ".join(args.message).strip()
     if not message:
         die('nothing to say — usage: communicate say "focus on the API tests first"')
-    append_entry(ledger, "Owner", args.title, message)
-    print(f'noted in the ledger as "## Owner — {args.title}".')
-    print("every agent reads the ledger at the start of its turn and treats")
-    print("the newest Owner entry as its top-priority instruction.")
+    if args.to:
+        if args.to not in _crew_names(cfg):
+            die(f"no agent named {args.to!r} — crew: {', '.join(_crew_names(cfg))}")
+        title = f"Directive for @{args.to}"
+        append_entry(ledger, "Owner", title, message)
+        print(f'directive posted as "## Owner — {title}".')
+        print(f"it lands in {args.to}'s inbox tagged [OWNER] [MENTIONS YOU]; "
+              f"the rest of the crew sees it but knows it is not theirs.")
+    else:
+        append_entry(ledger, "Owner", args.title, message)
+        print(f'noted in the ledger as "## Owner — {args.title}".')
+        print("every agent reads the ledger at the start of its turn and treats")
+        print("the newest Owner entry as its top-priority instruction.")
+
+
+def cmd_rule(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    if args.agent not in _crew_names(cfg):
+        die(f"no agent named {args.agent!r} — crew: {', '.join(_crew_names(cfg))}")
+    text = " ".join(args.text).strip()
+    if not text:
+        die('empty rule — usage: communicate rule Kestrel "never touch the db schema"')
+    append_entry(ledger, "Owner", f"Standing rule for @{args.agent}", text)
+    rules = standing_rules(ledger.read_text(), args.agent)
+    print(f"standing rule recorded — {args.agent} now carries "
+          f"{len(rules)} rule{'s' if len(rules) != 1 else ''}, injected into "
+          f"EVERY future turn (not just the next one).")
+    print("to change or lift a rule, post a newer one saying so — newest wins.")
 
 
 def cmd_claim(args: argparse.Namespace) -> None:
@@ -751,7 +811,14 @@ def main() -> None:
     p_say = sub.add_parser("say", help="add an Owner note — the crew's top-priority instruction")
     p_say.add_argument("message", nargs="+", help="what to tell the crew")
     p_say.add_argument("--title", default="Guidance", help='entry title (default "Guidance")')
+    p_say.add_argument("--to", default=None, metavar="AGENT",
+                       help="address one specific agent instead of the whole crew")
     p_say.set_defaults(fn=cmd_say)
+
+    p_rule = sub.add_parser("rule", help="standing behavioral rule for ONE agent, binding every turn")
+    p_rule.add_argument("agent", help="which agent the rule binds")
+    p_rule.add_argument("text", nargs="+", help="the rule")
+    p_rule.set_defaults(fn=cmd_rule)
 
     p_stop = sub.add_parser("stop", help="halt a running crew after the current turn")
     p_stop.add_argument("reason", nargs="*", help="optional reason, recorded in the ledger")
