@@ -1204,8 +1204,54 @@ def main() -> None:
     args = parser.parse_args()
     if args.cmd is None:
         cmd_overview()
+        if sys.stdin.isatty():
+            interactive(parser)
         return
     args.fn(args)
+
+
+def interactive(parser: argparse.ArgumentParser) -> None:
+    """Bare `communicate` on a real terminal opens a session: type commands
+    without the `communicate` prefix; the session survives command errors."""
+    print("\ninteractive session — type commands without the 'communicate' "
+          "prefix\n(e.g. run · watch · say hold on · status · inbox Kestrel · "
+          "help · quit)\n")
+    while True:
+        try:
+            line = input("communicate> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not line:
+            continue
+        if line in ("quit", "exit", "q"):
+            return
+        if line in ("help", "?"):
+            parser.print_help()
+            continue
+        try:
+            tokens = shlex.split(line)
+        except ValueError as exc:
+            print(f"  parse error: {exc}")
+            continue
+        if tokens[0] == "communicate":   # muscle memory is fine too
+            tokens = tokens[1:]
+        if not tokens:
+            continue
+        try:
+            args = parser.parse_args(tokens)
+        except SystemExit:               # argparse's error/help exit
+            continue
+        if args.cmd is None:
+            cmd_overview()
+            continue
+        try:
+            args.fn(args)
+        except SystemExit:               # die() inside a command
+            continue
+        except KeyboardInterrupt:
+            print("\n  (interrupted — session still open)")
+        print()
 
 
 if __name__ == "__main__":
