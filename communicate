@@ -216,6 +216,22 @@ MODEL_HINTS = {
     "aider": "any litellm model id",
 }
 
+ASK_PROMPT = """\
+You are agent "{name}" in the communicate.md crew for this project.
+
+The Owner asks a question and wants a DIRECT ANSWER, not new work:
+
+{question}
+
+Investigate this directory as needed (read files; run safe, read-only
+checks). Then append exactly ONE entry to ./{ledger}:
+"## {name} — ANSWER: <short restatement> ({date})"
+with a direct, honest answer and its evidence (file paths, line numbers,
+command output). If answering properly would require real work, say what
+and how much. Do NOT start other work; do NOT claim GOAL-COMPLETE.
+"""
+
+
 # Agent CLIs the init wizard knows how to wire up, in preference order.
 # Mixing vendors across agents is encouraged — a crew where the reviewer
 # runs on a different model than the implementer catches more.
@@ -827,6 +843,12 @@ def cmd_watch(_: argparse.Namespace) -> None:
                 continue
             append_entry(ledger, "Owner", "Guidance", line)
             print(paint("  noted — every agent treats your newest entry as top priority.", "32"))
+            if goal_complete(ledger.read_text(), names):
+                print(paint("  ⚠ but the goal is already COMPLETE — no run is active, so", "33"))
+                print(paint("    nobody will read this. For a question, use ", "33")
+                      + paint("communicate ask", "1;92")
+                      + paint('; for new work, set a new goal and ', "33")
+                      + paint("communicate run", "1;92") + paint(".", "33"))
     finally:
         stop_flag.set()
         print("\nleft the room — the crew keeps working. "
@@ -967,6 +989,47 @@ def cmd_add_agent(args: argparse.Namespace) -> None:
     print("tip: give each agent a distinct territory in its brief, and with 3+")
     print("     agents wire explicit review pairs — broadcast review requests")
     print("     produce nobody reviewing (SPEC §3.2).")
+
+
+def cmd_ask(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    question = " ".join(args.question).strip()
+    if not question:
+        die('usage: communicate ask "is the website responsive?"')
+    if args.agent:
+        agent = next((a for a in cfg["agents"] if a["name"] == args.agent), None)
+        if agent is None:
+            die(f"no agent named {args.agent!r} — crew: {', '.join(_crew_names(cfg))}")
+    else:
+        agent = cfg["agents"][0]
+
+    prompt = ASK_PROMPT.format(name=agent["name"], question=question,
+                               ledger=cfg["ledger"], date=today())
+    argv = [prompt if tok == "{prompt}" else tok
+            for tok in shlex.split(agent["command"])]
+    log_dir = root / CONFIG_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"ask-{today()}.log"
+    before = len(split_entries(ledger.read_text()))
+    print("  " + paint("?", "33") + " asking " + paint(agent["name"], "1")
+          + paint(" — one turn, no other work …", "2"), flush=True)
+    try:
+        with log_path.open("w") as log:
+            subprocess.run(argv, stdout=log, stderr=subprocess.STDOUT,
+                           timeout=cfg["timeout_minutes"] * 60, check=False)
+    except subprocess.TimeoutExpired:
+        die(f"agent timed out — see {log_path}")
+    entries = split_entries(ledger.read_text())
+    if len(entries) <= before:
+        die(f"no answer written — see {log_path}")
+    for entry in entries[before:]:
+        heading, _, body = entry.partition("\n")
+        print("\n" + colorize_heading(heading, USE_COLOR))
+        print(body.strip())
 
 
 def cmd_inbox(args: argparse.Namespace) -> None:
@@ -1300,6 +1363,7 @@ def cmd_commands(_: argparse.Namespace | None = None) -> None:
     row("communicate rule A <text>", "standing rule for A — re-asserted EVERY turn")
     row("communicate stop [reason]", "halt after the current turn; re-run resumes")
     row("communicate inbox <agent>", "what that agent owes: mentions, verdicts, notes")
+    row('communicate ask "<question>"', "one-shot answer from an agent, no other work")
     sect("memory (mostly automatic)")
     row("communicate compact", "fold old history into the digest agents boot from")
     row("communicate archive", "relocate pre-digest entries to queryable JSONL")
@@ -1387,6 +1451,11 @@ def main() -> None:
     p_stop = sub.add_parser("stop", help="halt a running crew after the current turn")
     p_stop.add_argument("reason", nargs="*", help="optional reason, recorded in the ledger")
     p_stop.set_defaults(fn=cmd_stop)
+
+    p_ask = sub.add_parser("ask", help='one-shot question to the crew: communicate ask "is X true?"')
+    p_ask.add_argument("question", nargs="+", help="what you want to know")
+    p_ask.add_argument("--agent", default=None, help="which agent answers (default: first)")
+    p_ask.set_defaults(fn=cmd_ask)
 
     p_inbox = sub.add_parser("inbox", help="what an agent must respond to (mentions, verdicts, Owner notes)")
     p_inbox.add_argument("agent", help="agent name (or Owner)")
