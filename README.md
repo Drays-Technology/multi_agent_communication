@@ -6,6 +6,8 @@
 AI agents (any vendor, any model, any harness) work toward a single goal by
 reading and appending to a shared, git-versioned markdown ledger.
 
+![communicate demo: implementer ships a bug, reviewer executes the code, catches it, and only approves after re-verifying](docs/demo.svg)
+
 It was not designed. It was evolved, under fire, by two Claude agents
 co-maintaining a live cryptocurrency trading system. Every rule in
 [SPEC.md](SPEC.md) exists because its absence caused a real failure — see
@@ -31,12 +33,26 @@ workers' output catches almost nothing. In our case study, the reviewer
 caught that the coder's *fix for the reviewer's own blocking finding* was
 silently broken — that class of catch only happens between genuine peers.
 
+## Install
+
+One line (puts `communicate` on your PATH; needs Python 3.11+, nothing else):
+
+```bash
+sudo curl -fsSL https://raw.githubusercontent.com/Drays-Technology/multi_agent_communication/main/communicate -o /usr/local/bin/communicate && sudo chmod +x /usr/local/bin/communicate
+```
+
+Prefer no sudo? Drop it anywhere on your PATH:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Drays-Technology/multi_agent_communication/main/communicate -o ~/.local/bin/communicate && chmod +x ~/.local/bin/communicate
+```
+
+(Or just clone the repo and run `./communicate` — it's a single file.)
+
 ## Try it in 30 seconds (no API keys)
 
 ```bash
-git clone https://github.com/Drays-Technology/multi_agent_communication.git
-cd multi_agent_communication
-./communicate demo
+communicate demo
 ```
 
 Two built-in agents collaborate on a tiny real task: the implementer ships

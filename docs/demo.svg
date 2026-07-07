@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 626" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="14" xml:space="preserve">
+<style>.l0{opacity:0;animation:a0 18.0s steps(1,end) infinite}@keyframes a0{0%{opacity:0}2.22%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l1{opacity:0;animation:a1 18.0s steps(1,end) infinite}@keyframes a1{0%{opacity:0}6.67%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l2{opacity:0;animation:a2 18.0s steps(1,end) infinite}@keyframes a2{0%{opacity:0}8.33%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l4{opacity:0;animation:a4 18.0s steps(1,end) infinite}@keyframes a4{0%{opacity:0}10.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l5{opacity:0;animation:a5 18.0s steps(1,end) infinite}@keyframes a5{0%{opacity:0}12.22%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l7{opacity:0;animation:a7 18.0s steps(1,end) infinite}@keyframes a7{0%{opacity:0}15.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l8{opacity:0;animation:a8 18.0s steps(1,end) infinite}@keyframes a8{0%{opacity:0}17.78%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l9{opacity:0;animation:a9 18.0s steps(1,end) infinite}@keyframes a9{0%{opacity:0}22.22%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l10{opacity:0;animation:a10 18.0s steps(1,end) infinite}@keyframes a10{0%{opacity:0}25.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l11{opacity:0;animation:a11 18.0s steps(1,end) infinite}@keyframes a11{0%{opacity:0}31.11%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l12{opacity:0;animation:a12 18.0s steps(1,end) infinite}@keyframes a12{0%{opacity:0}35.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l13{opacity:0;animation:a13 18.0s steps(1,end) infinite}@keyframes a13{0%{opacity:0}37.78%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l14{opacity:0;animation:a14 18.0s steps(1,end) infinite}@keyframes a14{0%{opacity:0}43.33%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l15{opacity:0;animation:a15 18.0s steps(1,end) infinite}@keyframes a15{0%{opacity:0}46.67%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l16{opacity:0;animation:a16 18.0s steps(1,end) infinite}@keyframes a16{0%{opacity:0}52.22%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l17{opacity:0;animation:a17 18.0s steps(1,end) infinite}@keyframes a17{0%{opacity:0}55.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l18{opacity:0;animation:a18 18.0s steps(1,end) infinite}@keyframes a18{0%{opacity:0}57.78%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l19{opacity:0;animation:a19 18.0s steps(1,end) infinite}@keyframes a19{0%{opacity:0}62.22%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l20{opacity:0;animation:a20 18.0s steps(1,end) infinite}@keyframes a20{0%{opacity:0}65.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l21{opacity:0;animation:a21 18.0s steps(1,end) infinite}@keyframes a21{0%{opacity:0}71.11%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l23{opacity:0;animation:a23 18.0s steps(1,end) infinite}@keyframes a23{0%{opacity:0}75.56%{opacity:1}99.5%{opacity:1}100%{opacity:0}}.l24{opacity:0;animation:a24 18.0s steps(1,end) infinite}@keyframes a24{0%{opacity:0}78.89%{opacity:1}99.5%{opacity:1}100%{opacity:0}}</style>
+<rect width="760" height="626" rx="10" fill="#0d1117" stroke="#30363d"/>
+<circle cx="24" cy="22" r="6" fill="#f85149"/>
+<circle cx="46" cy="22" r="6" fill="#d29922"/>
+<circle cx="68" cy="22" r="6" fill="#3fb950"/>
+<text x="380" y="27" fill="#8b949e" text-anchor="middle" font-size="12">communicate demo — no API keys, ~1 second</text>
+<text class="l0" x="24" y="56" fill="#3fb950">$ ./communicate demo</text>
+<text class="l1" x="24" y="78" fill="#c9d1d9">communicate demo — two built-in agents, one goal, zero API keys.</text>
+<text class="l2" x="24" y="100" fill="#c9d1d9">Kestrel implements; Heron reviews BY EXECUTING the code.</text>
+<text class="l4" x="24" y="144" fill="#8b949e">goal: Write fizzbuzz.py (1-20, classic rules), verified by execution …</text>
+<text class="l5" x="24" y="166" fill="#8b949e">agents: Kestrel(Implementer), Heron(Reviewer)</text>
+<text class="l7" x="24" y="210" fill="#58a6ff">round 1/4</text>
+<text class="l8" x="24" y="232" fill="#8b949e">  ▸ Kestrel (Implementer) working …</text>
+<text class="l9" x="24" y="254" fill="#d29922">    ↳ ## Kestrel — PROPOSED: fizzbuzz.py first cut</text>
+<text class="l10" x="24" y="276" fill="#8b949e">  ▸ Heron (Reviewer) working …</text>
+<text class="l11" x="24" y="298" fill="#f85149">    ↳ ## Heron — BLOCKING: 15 prints the wrong thing</text>
+<text class="l12" x="24" y="320" fill="#58a6ff">round 2/4</text>
+<text class="l13" x="24" y="342" fill="#8b949e">  ▸ Kestrel (Implementer) working …</text>
+<text class="l14" x="24" y="364" fill="#bc8cff">    ↳ ## Kestrel — COUNTER-REVIEW: divisibility order fixed</text>
+<text class="l15" x="24" y="386" fill="#8b949e">  ▸ Heron (Reviewer) working …</text>
+<text class="l16" x="24" y="408" fill="#3fb950">    ↳ ## Heron — APPROVED: fix verified</text>
+<text class="l17" x="24" y="430" fill="#58a6ff">round 3/4</text>
+<text class="l18" x="24" y="452" fill="#8b949e">  ▸ Kestrel (Implementer) working …</text>
+<text class="l19" x="24" y="474" fill="#d29922">    ↳ ## Kestrel — GOAL-COMPLETE: fizzbuzz verified</text>
+<text class="l20" x="24" y="496" fill="#8b949e">  ▸ Heron (Reviewer) working …</text>
+<text class="l21" x="24" y="518" fill="#3fb950">    ↳ ## Heron — APPROVED: GOAL-COMPLETE</text>
+<text class="l23" x="24" y="562" fill="#3fb950">✓ GOAL-COMPLETE claimed and independently APPROVED — stopping.</text>
+<text class="l24" x="24" y="584" fill="#8b949e">  read the full story: communicate-demo/communicate.md</text>
+</svg>
