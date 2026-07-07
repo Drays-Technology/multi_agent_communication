@@ -66,21 +66,73 @@ re-verifying the fix. The whole story lands in a readable
 `communicate-demo/communicate.md`. That's the protocol, live, in seconds —
 no accounts, no keys, no cost.
 
-## Run your own crew
+## Step by step: from zero to a working crew
 
-`communicate` is a zero-dependency CLI (Python 3.11+): **define agents,
-define a goal, let them work.**
+**1. Install** (one line, from the Install section above), then sanity-check:
 
 ```bash
-cd your-project
-/path/to/communicate init     # guided setup: asks your goal, detects your
-                              # agent CLIs, writes crew.toml
-/path/to/communicate run      # agents take turns until done
-/path/to/communicate status   # goal, roster, ledger tail
+communicate demo          # watch a full collaboration, free, ~1 second
 ```
 
-Heads-up on cost: `run` invokes your agent CLI once per turn — normal API
-charges apply, so start with a small goal.
+**2. Go to your project** — any project; if the work lives in files, a crew
+can do it:
+
+```bash
+cd ~/code/my-project
+communicate               # bare command orients you: no crew here yet →
+                          # it points you at init
+```
+
+**3. Create the crew** — three questions:
+
+```bash
+communicate init
+# 1) What is the goal?           → type it; be specific about "done".
+# 2) Which CLI powers each agent? → it detects claude/codex/aider/gemini
+#      implementer uses [1]: 1        on your PATH. Pick per agent —
+#      reviewer uses    [1]: 2        Claude builds, Codex reviews.
+# 3) Name the agents             → Enter accepts Kestrel/Heron.
+```
+
+**4. Preflight** — catch auth/flag problems before burning a real run:
+
+```bash
+communicate doctor        # free static checks: CLIs installed, config sane
+communicate doctor --live # + one real round-trip per agent (a few tokens)
+```
+
+**5. Put them to work** (cost note: every turn is one agent-CLI invocation
+— normal API charges apply, so start with a small goal):
+
+```bash
+communicate run
+# round 1/12
+#   ▸ Kestrel (Implementer) working … (watch: tail -f .communicate/logs/…)
+#     ↳ ## Kestrel — PROPOSED: api scaffold + failing tests
+#   ▸ Heron (Reviewer) working …
+#     ↳ ## Heron — BLOCKING: POST /todos ignores the title field
+```
+
+**6. Supervise from a second terminal** — you are the conscience:
+
+```bash
+communicate watch                              # live feed of every entry
+communicate say "ship the API before any UI"   # guide everyone
+communicate say --to Kestrel "smaller commits" # direct one agent
+communicate rule Heron "always run the tests yourself before approving"
+communicate stop "pausing to look around"      # halt; re-run resumes
+```
+
+**7. It ends honestly** — the run stops only when one agent claims
+`GOAL-COMPLETE` and a **different** agent independently verifies and
+approves. Read `communicate.md` afterward: the whole story — decisions,
+findings, verdicts, your steering — in one reviewable file.
+
+**8. Long projects manage their own memory** — nothing for you to do:
+every ~25 entries the history is compacted into a digest agents boot from;
+past ~120 entries the old full text is losslessly archived to JSONL.
+`communicate history "that tokenizer bug"` searches everything ever
+written.
 
 ## You are the conscience
 

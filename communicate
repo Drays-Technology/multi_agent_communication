@@ -1023,6 +1023,65 @@ def cmd_demo_agent(args: argparse.Namespace) -> None:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 
+def cmd_doctor(args: argparse.Namespace) -> None:
+    """Preflight the crew: is every agent actually invocable before we burn
+    a real run on finding out it isn't?"""
+    problems = 0
+
+    def check(ok: bool, label: str, detail: str = "") -> None:
+        nonlocal problems
+        print(f"  {'✓' if ok else '✗'} {label}" + (f" — {detail}" if detail else ""))
+        if not ok:
+            problems += 1
+
+    print("communicate doctor\n")
+    check(sys.version_info >= (3, 11), f"python {sys.version.split()[0]} (need 3.11+)")
+
+    root = Path.cwd()
+    if not (root / CONFIG).exists():
+        check(False, CONFIG, "not found — run `communicate init` first")
+        sys.exit(1)
+    cfg = load_config(root)  # exits with a precise message on structural errors
+    check(True, f"{CONFIG} parsed — {len(cfg['agents'])} agents, "
+                f"compact_every={cfg['compact_every']}, archive_after={cfg['archive_after']}")
+    ledger = root / cfg["ledger"]
+    check(ledger.exists(), f"ledger {cfg['ledger']}",
+          "" if ledger.exists() else "missing — `communicate init` creates it")
+
+    for agent in cfg["agents"]:
+        name = agent["name"]
+        try:
+            argv = shlex.split(agent["command"])
+        except ValueError as exc:
+            check(False, f"{name}: command parses", str(exc))
+            continue
+        check("{prompt}" in argv, f"{name}: command has a {{prompt}} placeholder")
+        exe_path = shutil.which(argv[0]) if argv else None
+        check(exe_path is not None, f"{name}: executable {argv[0]!r}",
+              exe_path or "not found on PATH — is the CLI installed?")
+        if args.live and exe_path and "{prompt}" in argv:
+            test_prompt = ("This is a connectivity test from `communicate doctor`. "
+                           "Do nothing else; reply with exactly: CREW-OK")
+            live_argv = [test_prompt if t == "{prompt}" else t for t in argv]
+            print(f"  … {name}: live round-trip (may take a minute, costs a few tokens)")
+            try:
+                res = subprocess.run(live_argv, capture_output=True, text=True,
+                                     timeout=args.timeout)
+                ok = "CREW-OK" in (res.stdout + res.stderr)
+                check(ok, f"{name}: live round-trip",
+                      "responded correctly" if ok else
+                      f"no CREW-OK in output (exit {res.returncode}) — check auth/flags; "
+                      f"first output line: {(res.stdout + res.stderr).strip().splitlines()[0][:80] if (res.stdout + res.stderr).strip() else '(empty)'}")
+            except subprocess.TimeoutExpired:
+                check(False, f"{name}: live round-trip", f"timed out after {args.timeout}s")
+
+    if problems:
+        print(f"\n{problems} problem{'s' if problems != 1 else ''} — fix before `communicate run`.")
+        sys.exit(1)
+    print("\nall checks passed — ready to run."
+          + ("" if args.live else " (add --live to test real agent round-trips)"))
+
+
 def cmd_overview() -> None:
     """Bare `communicate` in a project directory: orient, don't error."""
     root = Path.cwd()
@@ -1064,6 +1123,13 @@ def main() -> None:
     p_run = sub.add_parser("run", help="run agents toward the goal")
     p_run.add_argument("--rounds", type=int, default=None)
     p_run.set_defaults(fn=cmd_run)
+
+    p_doctor = sub.add_parser("doctor", help="preflight: is every agent invocable?")
+    p_doctor.add_argument("--live", action="store_true",
+                          help="also do a real round-trip per agent (costs a few tokens)")
+    p_doctor.add_argument("--timeout", type=int, default=120,
+                          help="seconds per live round-trip (default 120)")
+    p_doctor.set_defaults(fn=cmd_doctor)
 
     p_status = sub.add_parser("status", help="show goal, agents, ledger tail")
     p_status.set_defaults(fn=cmd_status)
