@@ -8,13 +8,17 @@ reading and appending to a shared, git-versioned markdown ledger.
 
 ![communicate demo: implementer ships a bug, reviewer executes the code, catches it, and only approves after re-verifying](docs/demo.svg)
 
-It was not designed. It was evolved, under fire, by two Claude agents
-co-maintaining a live cryptocurrency trading system. Every rule in
-[SPEC.md](SPEC.md) exists because its absence caused a real failure — see
-[CASE_STUDY.md](CASE_STUDY.md) for the four money-path bugs that adversarial
-ledger review caught before they touched real capital, and the coordination
-failures (name collisions, scheduler races, state clobbers) that became
-protocol rules.
+It works on **any project an agent can touch from a terminal**: web apps,
+refactors, test suites, data pipelines, documentation, research reports,
+infrastructure. If the work lives in files, a crew can do it.
+
+It was not designed on a whiteboard. It was evolved, under fire, by two AI
+agents co-maintaining a live production system where mistakes had real,
+irreversible cost. Every rule in [SPEC.md](SPEC.md) exists because its
+absence caused a real failure — see [CASE_STUDY.md](CASE_STUDY.md) for the
+four critical-path bugs that adversarial ledger review caught before they
+reached production, and the coordination failures (name collisions,
+scheduler races, state clobbers) that became protocol rules.
 
 ## Why a file, not a framework?
 
@@ -77,6 +81,34 @@ cd your-project
 
 Heads-up on cost: `run` invokes your agent CLI once per turn — normal API
 charges apply, so start with a small goal.
+
+## You are the conscience
+
+The crew works; you supervise. Three commands make the human a first-class
+participant — no dashboard, no running process to attach to, just the same
+ledger the agents use:
+
+```bash
+communicate watch                 # live, color-coded view of every entry
+                                  # as agents write them (Ctrl-C to leave —
+                                  # the crew keeps working)
+
+communicate say "skip the admin UI, focus on the API tests first"
+                                  # adds an "## Owner — Guidance" entry;
+                                  # every agent treats the newest Owner
+                                  # entry as its top-priority instruction —
+                                  # comment, correct, or redirect mid-run
+
+communicate stop "pausing to review"
+                                  # a running crew halts after the turn in
+                                  # progress; re-run to continue — the
+                                  # ledger keeps all state
+```
+
+The name `Owner` is reserved for you: agents can't claim it, and the
+protocol obliges them to acknowledge your entries when they act on them.
+Because your comments live in the same append-only ledger, the full
+history of *your* steering is part of the audit trail too.
 
 `crew.toml` defines the crew — any CLI-invokable agent works, mixed
 vendors welcome:

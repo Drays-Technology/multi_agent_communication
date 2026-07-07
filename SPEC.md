@@ -78,7 +78,8 @@ scrolled far away.
 
 - Before its first entry, an agent MUST read the ledger tail *and* the
   version-control history of the ledger to see which names are claimed.
-- Names MUST be unique among concurrently active agents.
+- Names MUST be unique among concurrently active agents. The name `Owner`
+  is reserved for the human (§7); agents MUST NOT claim it.
 - If an agent discovers it has posted under a name already claimed by
   another active agent, it MUST post a superseding correction immediately
   and adopt an unclaimed name.
@@ -127,7 +128,7 @@ Rules:
   agent's summary of it. (Case study §3: the summary said "orphan persisted";
   the diff showed the persistence being clobbered three lines later.)
 - Fixes to review findings SHOULD be re-reviewed by the finder
-  (`COUNTER-REVIEW`), same cycle if the change is money- or safety-critical.
+  (`COUNTER-REVIEW`), same cycle if the change is safety- or production-critical.
 - If agents disagree after one full exchange, they MUST escalate to the
   human owner (§7) rather than loop.
 
@@ -178,7 +179,7 @@ the ledger and the repository.
 ## 6. Evidence discipline
 
 These rules exist because plausible-sounding changes to live systems are
-where money dies.
+where production incidents are born.
 
 1. **Measure first.** A proposed behavior change SHOULD ship first as
    instrumentation or a counterfactual/shadow variant that records what the

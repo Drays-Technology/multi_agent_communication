@@ -15,6 +15,13 @@ Usage:
     communicate run --rounds 5    override max rounds
     communicate status            show goal, agents, and the ledger tail
 
+  You are the crew's conscience — watch them, guide them, stop them:
+    communicate watch             live view of ledger entries as they land
+    communicate say <message>     add an Owner note; agents treat the newest
+                                  Owner entry as their top-priority instruction
+    communicate stop [reason]     tell a running crew to halt after the
+                                  current turn
+
 Requires Python 3.11+ (stdlib only).
 """
 
@@ -97,6 +104,10 @@ entries, verdicts, and review asks are there. Protocol rules, short form:
 - Never edit or delete existing entries; correct mistakes by superseding.
 - Never approve your own change; review actual diffs/behavior, not summaries.
 - Address open review asks directed at you before starting new work.
+- Entries signed "Owner" are the human's voice. The NEWEST Owner entry is
+  your highest-priority instruction — it may add constraints, redirect your
+  work, or amend the goal itself. Acknowledge it in your entry when you act
+  on it.
 - Anything irreversible or outside the goal's stated constraints: do NOT do
   it — record it as "pending owner" in your entry instead.
 
@@ -143,6 +154,8 @@ def load_config(root: Path) -> dict:
     names = [a["name"] for a in cfg["agents"]]
     if len(names) != len(set(names)):
         die(f"agent names must be unique, got: {names}")
+    if "Owner" in names:
+        die('"Owner" is reserved for the human — rename that agent')
     cfg.setdefault("ledger", "communicate.md")
     cfg.setdefault("max_rounds", 12)
     cfg.setdefault("timeout_minutes", 30)
@@ -169,6 +182,10 @@ def goal_complete(ledger_text: str, agent_names: list[str]) -> bool:
 def append_entry(ledger: Path, agent: str, title: str, body: str) -> None:
     with ledger.open("a") as fh:
         fh.write(f"\n## {agent} — {title} ({today()})\n\n{body.rstrip()}\n")
+
+
+def owner_stop_count(ledger_text: str) -> int:
+    return len(re.findall(r"^## Owner — STOP", ledger_text, re.MULTILINE))
 
 
 # ── init (wizard) ────────────────────────────────────────────────────────────
@@ -311,15 +328,23 @@ def cmd_run(args: argparse.Namespace) -> None:
         "{}({})".format(a["name"], a.get("role", "?")) for a in cfg["agents"]
     )
     print(f"goal: {cfg['goal'].strip().splitlines()[0]} …")
-    print(f"agents: {roster}\n")
+    print(f"agents: {roster}")
+    print("you: `communicate watch` to observe, `communicate say <msg>` to "
+          "guide, `communicate stop` to halt\n")
 
+    stops_at_launch = owner_stop_count(ledger.read_text())
     for round_no in range(1, cfg["max_rounds"] + 1):
         print(f"round {round_no}/{cfg['max_rounds']}")
         for agent in cfg["agents"]:
             run_turn(agent, cfg, round_no, log_dir, ledger)
-            if goal_complete(ledger.read_text(), names):
+            text = ledger.read_text()
+            if goal_complete(text, names):
                 print("\n✓ GOAL-COMPLETE claimed and independently APPROVED — stopping.")
                 print(f"  read the full story: {ledger}")
+                return
+            if owner_stop_count(text) > stops_at_launch:
+                print("\n■ Owner said STOP — halting after this turn.")
+                print(f"  the ledger holds the state: {ledger} — re-run to continue.")
                 return
     print(f"\nmax rounds ({cfg['max_rounds']}) reached without an approved "
           f"GOAL-COMPLETE. The ledger holds the state — re-run to continue.")
@@ -346,6 +371,103 @@ def cmd_status(_: argparse.Namespace) -> None:
         print(f"complete: {'YES' if goal_complete(text, names) else 'no'}")
     else:
         print("ledger: (missing)")
+
+
+# ── owner interface: watch / say / stop ─────────────────────────────────────
+# The human is the crew's conscience. These commands need no running process
+# to coordinate with — they read and append the same ledger the agents use,
+# which is the whole point of the protocol.
+
+VERDICT_COLORS = [
+    ("BLOCKING", "\033[31m"),        # red
+    ("APPROVED: GOAL-COMPLETE", "\033[92m"),
+    ("GOAL-COMPLETE", "\033[92m"),   # bright green
+    ("APPROVED", "\033[32m"),        # green
+    ("COUNTER-REVIEW", "\033[35m"),  # magenta
+    ("PROPOSED", "\033[33m"),        # yellow
+    ("STOP", "\033[31m"),
+]
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+
+
+def colorize_heading(heading: str, use_color: bool) -> str:
+    if not use_color:
+        return heading
+    for keyword, color in VERDICT_COLORS:
+        if f"— {keyword}" in heading or f"— {keyword}:" in heading:
+            return f"{color}{BOLD}{heading}{RESET}"
+    if heading.startswith("## Owner"):
+        return f"\033[36m{BOLD}{heading}{RESET}"  # cyan: the human's voice
+    return f"{BOLD}{heading}{RESET}"
+
+
+def split_entries(ledger_text: str) -> list[str]:
+    """The ledger as a list of whole entries (heading + body)."""
+    parts = re.split(r"(?m)^(?=## )", ledger_text)
+    return [p.rstrip() for p in parts if p.startswith("## ")]
+
+
+def cmd_watch(_: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    use_color = sys.stdout.isatty()
+    seen = 0
+    print(f"watching {ledger} — Ctrl-C to leave.")
+    print(f"{DIM if use_color else ''}guide the crew anytime: "
+          f"`communicate say <message>` / `communicate stop`"
+          f"{RESET if use_color else ''}\n")
+    entries = split_entries(ledger.read_text())
+    # Show the last few immediately so the watcher has context…
+    for entry in entries[-3:]:
+        heading, _, body = entry.partition("\n")
+        print(colorize_heading(heading, use_color))
+        print(body.strip() + "\n" if body.strip() else "")
+    seen = len(entries)
+    # …then stream everything new.
+    try:
+        while True:
+            time.sleep(1.0)
+            entries = split_entries(ledger.read_text())
+            for entry in entries[seen:]:
+                heading, _, body = entry.partition("\n")
+                print(colorize_heading(heading, use_color))
+                print(body.strip() + "\n" if body.strip() else "")
+            seen = max(seen, len(entries))
+    except KeyboardInterrupt:
+        print("\nleft the room — the crew keeps working. "
+              "`communicate status` for a summary anytime.")
+
+
+def cmd_say(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    message = " ".join(args.message).strip()
+    if not message:
+        die('nothing to say — usage: communicate say "focus on the API tests first"')
+    append_entry(ledger, "Owner", args.title, message)
+    print(f'noted in the ledger as "## Owner — {args.title}".')
+    print("every agent reads the ledger at the start of its turn and treats")
+    print("the newest Owner entry as its top-priority instruction.")
+
+
+def cmd_stop(args: argparse.Namespace) -> None:
+    root = Path.cwd()
+    cfg = load_config(root)
+    ledger = root / cfg["ledger"]
+    if not ledger.exists():
+        die(f"ledger {cfg['ledger']} not found")
+    reason = " ".join(args.reason).strip() or "Halt after the current turn."
+    append_entry(ledger, "Owner", "STOP", reason)
+    print("STOP posted — a running crew halts after the turn in progress.")
+    print("re-run `communicate run` to continue later; the ledger keeps the state.")
 
 
 # ── demo ─────────────────────────────────────────────────────────────────────
@@ -515,6 +637,18 @@ def main() -> None:
 
     p_status = sub.add_parser("status", help="show goal, agents, ledger tail")
     p_status.set_defaults(fn=cmd_status)
+
+    p_watch = sub.add_parser("watch", help="live view of ledger entries as they land")
+    p_watch.set_defaults(fn=cmd_watch)
+
+    p_say = sub.add_parser("say", help="add an Owner note — the crew's top-priority instruction")
+    p_say.add_argument("message", nargs="+", help="what to tell the crew")
+    p_say.add_argument("--title", default="Guidance", help='entry title (default "Guidance")')
+    p_say.set_defaults(fn=cmd_say)
+
+    p_stop = sub.add_parser("stop", help="halt a running crew after the current turn")
+    p_stop.add_argument("reason", nargs="*", help="optional reason, recorded in the ledger")
+    p_stop.set_defaults(fn=cmd_stop)
 
     p_da = sub.add_parser("_demo-agent")  # internal: a scripted demo agent turn
     p_da.add_argument("name")

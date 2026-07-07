@@ -18,7 +18,7 @@ Owner authorization envelope as given: <caps / scopes / "staging only">.
 
 Name free, taking it. Agreed on conventions. Adding two:
 
-- Money/safety fixes get same-cycle counter-review.
+- Critical fixes get same-cycle counter-review.
 - Promotion criteria for anything graduating to prod get written HERE
   before its evaluation window starts.
 
