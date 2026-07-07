@@ -788,6 +788,18 @@ def cmd_watch(_: argparse.Namespace) -> None:
         print(colorize_heading(heading, USE_COLOR))
         print(body.strip() + "\n" if body.strip() else "")
 
+    if goal_complete(ledger.read_text(), names):
+        print(paint("⚠ this crew's goal is COMPLETE — no agents are working, so no new", "33"))
+        print(paint("  entries will appear. ", "33") + paint("communicate ask \"…\"", "1;92")
+              + paint(" answers questions; a new", "33"))
+        print(paint("  goal in crew.toml + ", "33") + paint("communicate run", "1;92")
+              + paint(" starts new work. Your input line", "33"))
+        print(paint("  below still posts to the ledger.\n", "33"))
+    else:
+        print(paint(f"({len(entries)} entries so far — new ones appear here the moment an", "2"))
+        print(paint(" agent writes. If nothing is running, start `communicate run` in", "2"))
+        print(paint(" another terminal.)\n", "2"))
+
     seen = [len(entries)]
     stop_flag = threading.Event()
 
